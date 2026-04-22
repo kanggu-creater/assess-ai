@@ -108,19 +108,30 @@ function App(){
 
   useEffect(()=>{
     const parse=async()=>{
+      // 쿼리 파라미터 방식 (?id=, ?code=)
+      const params=new URLSearchParams(window.location.search);
+      const sid=params.get("id");
+      const code=params.get("code");
+      // 해시 방식 폴백 (#s/, #c/)
       const h=window.location.hash;
+
+      if(sid){setSAsmId(sid);setMode("student");return;}
+      if(code){
+        const c=code.toUpperCase();
+        const asms=await DB.getA();
+        const found=asms.find(a=>shortCode(a.id)===c);
+        if(found){setSAsmId(found.id);setMode("student");return;}
+      }
       if(h.startsWith("#s/")){setSAsmId(decodeURIComponent(h.slice(3)));setMode("student");return;}
       if(h.startsWith("#c/")){
-        const code=h.slice(3).toUpperCase();
+        const c=h.slice(3).toUpperCase();
         const asms=await DB.getA();
-        const found=asms.find(a=>shortCode(a.id)===code);
+        const found=asms.find(a=>shortCode(a.id)===c);
         if(found){setSAsmId(found.id);setMode("student");return;}
       }
       setMode("teacher");
     };
     parse();
-    window.addEventListener("hashchange",parse);
-    return()=>window.removeEventListener("hashchange",parse);
   },[]);
 
   if(mode==="loading")return null;
@@ -283,9 +294,9 @@ function CriteriaTab({asms,onSave}){
 function QRTab({asms}){
   const [selId,setSelId]=useState(null);
   const sel=asms.find(a=>a.id===selId);
-  const base=window.location.href.split("#")[0];
-  const stuUrl=selId?`${base}#s/${selId}`:"";
-
+  const base=window.location.href.split(/[#?]/)[0];
+  const stuUrl=selId?`${base}?id=${selId}`:"";
+  const codeUrl=selId?`${base}?code=${shortCode(selId)}`:"";
   return(
     <div>
       <p style={{color:"#64748B",fontSize:14,marginTop:0,marginBottom:16}}>평가기준을 클릭하면 QR코드가 바로 생성됩니다.</p>
