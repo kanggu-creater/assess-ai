@@ -78,12 +78,14 @@ async function askAI(msgs,sys){
     body:JSON.stringify({
       system_instruction:{parts:[{text:sys}]},
       contents,
-      generationConfig:{maxOutputTokens:1000,temperature:0.7},
+      generationConfig:{maxOutputTokens:1500,temperature:0.7,thinkingConfig:{thinkingBudget:0}},
     }),
   });
   const d=await res.json();
   if(d.error)throw new Error(d.error.message);
-  return d.candidates[0].content.parts[0].text;
+  // 텍스트 파트만 추출 (thinking 파트 제외)
+  const text=d.candidates[0].content.parts.filter(p=>p.text).map(p=>p.text).join("");
+  return text;
 }
 
 // 사용 모델: gemini-2.5-flash
@@ -487,9 +489,30 @@ function StudentPage({asmId}){
     try{
       const apiMsgs=msgs.map(m=>({role:m.role,content:m.role==="user"?m.content:JSON.stringify({answer:m.answer,score:m.score,feedback:m.feedback})}));
       apiMsgs.push({role:"user",content});
-      const sys=`당신은 중학교 과학 수업의 AI 평가 도우미입니다.\n수업 주제: ${asm?.subject||"과학"}\n평가기준:\n${asm?.criteria}\n최대 점수: ${asm?.maxScore||10}점\n\n학생이 질문하면:\n1. 중학생 수준에 맞게 친절하고 정확하게 답변하세요.\n2. 평가기준에 따라 질문 점수를 채점하세요 (0~${asm?.maxScore||10}점).\n3. 더 좋은 질문을 할 수 있도록 구체적인 피드백을 주세요.\n\n반드시 아래 JSON 형식으로만 응답하세요:\n{"answer":"...","score":숫자,"feedback":"..."}`;
+      const sys=`당신은 중학교 과학 수업의 AI 평가 도우미입니다.
+수업 주제: ${asm?.subject||"과학"}
+최대 점수: ${asm?.maxScore||10}점
+
+[평가기준]
+${asm?.criteria}
+
+[역할]
+1. 학생 질문에 대해 정확하고 친절하게 답변하세요. 중학생 수준에 맞게 쉽게 설명해주세요.
+2. 위 평가기준에 따라 학생의 질문을 채점하세요. 점수는 반드시 0~${asm?.maxScore||10} 사이 정수여야 합니다.
+3. 더 높은 점수를 받을 수 있도록 구체적인 피드백을 주세요.
+
+[응답 형식 - 반드시 아래 JSON만 출력하고 다른 텍스트는 절대 쓰지 마세요]
+{"answer":"(질문에 대한 정확한 답변)","score":(숫자),"feedback":"(더 좋은 질문을 위한 피드백)"}`;
       const raw=await askAI(apiMsgs,sys);
-      let parsed;try{parsed=JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{parsed={answer:raw,score:0,feedback:""};}
+      // JSON 추출 (마크다운 코드블록 및 앞뒤 텍스트 제거)
+      let parsed;
+      try{
+        const clean=raw.replace(/```json|```/g,"").trim();
+        const jsonMatch=clean.match(/\{[\s\S]*\}/);
+        parsed=jsonMatch?JSON.parse(jsonMatch[0]):{answer:raw,score:0,feedback:""};
+      }catch{
+        parsed={answer:raw,score:0,feedback:""};
+      }
       const aiMsg={role:"assistant",answer:parsed.answer,score:parsed.score,feedback:parsed.feedback};
       const finalMsgs=[...nextMsgs,aiMsg];const newBest=Math.max(best,parsed.score??0);
       setMsgs(finalMsgs);setBest(newBest);
