@@ -16,17 +16,23 @@
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
+// ██████████████████████████████████████████████████████████
+// ★ 아래 두 줄에 본인의 값을 입력하세요 ★
+const FIREBASE_URL = "https://assess-ai-77355-default-rtdb.firebaseio.com";
+const GEMINI_KEY   = "AIzaSyBHm86zrVL-j6THp_wTxjaqUDDs-nXAeOw";
+// ██████████████████████████████████████████████████████████
+
 // ── 상수 ──────────────────────────────────────────────────
 const BL="#1D4ED8", DK="#1E293B";
 const btn=(bg,col="white",ex={})=>({padding:"10px 20px",background:bg,color:col,border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,...ex});
 const inp={padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSize:14,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"};
 const shortCode=id=>id?id.slice(-6).toUpperCase():"";
 
-// ── 설정 (localStorage) ───────────────────────────────────
+// ── 설정 ─────────────────────────────────────────────────
 const CFG={
-  get fbUrl(){return localStorage.getItem("aai_fb")||"";},
+  get fbUrl(){return FIREBASE_URL||localStorage.getItem("aai_fb")||"";},
   set fbUrl(v){localStorage.setItem("aai_fb",v);},
-  get apiKey(){return localStorage.getItem("aai_key")||"";},
+  get apiKey(){return GEMINI_KEY||localStorage.getItem("aai_key")||"";},
   set apiKey(v){localStorage.setItem("aai_key",v);},
   get ready(){return !!(this.fbUrl&&this.apiKey);},
 };
