@@ -78,7 +78,7 @@ async function askAI(msgs,sys){
     body:JSON.stringify({
       system_instruction:{parts:[{text:sys}]},
       contents,
-      generationConfig:{maxOutputTokens:1500,temperature:0.7,thinkingConfig:{thinkingBudget:0}},
+      generationConfig:{maxOutputTokens:1500,temperature:0,thinkingConfig:{thinkingBudget:0}},
     }),
   });
   const d=await res.json();
