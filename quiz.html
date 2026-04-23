@@ -274,25 +274,31 @@ function TeacherApp({user}) {
 
 function GenerateTab({quizzes, onSave, onSwitch}) {
   const [title,setTitle]=useState(""); const [subject,setSubject]=useState("");
-  const [grade,setGrade]=useState(""); const [cls,setCls]=useState("");
+  const [school,setSchool]=useState(""); const [grade,setGrade]=useState("");
   const [memo,setMemo]=useState(""); const [loading,setLoading]=useState(false);
   const [qs,setQs]=useState([]); const [saved,setSaved]=useState(false);
+  const [mcCount,setMcCount]=useState(3); const [saCount,setSaCount]=useState(2);
 
   const generate = async () => {
     if (!title.trim()||!subject.trim()) return alert("제목과 수업 주제를 입력해주세요.");
+    const total = mcCount + saCount;
+    if (total === 0) return alert("선택형 또는 서술형 중 최소 1문제는 있어야 합니다.");
     setLoading(true); setQs([]); setSaved(false);
     try {
-      const prompt = `중학교 과학 수업 형성평가 문제 5개를 출제하세요.
+      let typeList = [];
+      for (let i=0; i<mcCount; i++) typeList.push("객관식");
+      for (let i=0; i<saCount; i++) typeList.push("주관식");
+
+      const prompt = `중학교 과학 수업 형성평가 문제 ${total}개를 출제하세요.
 수업 주제: ${subject}
 ${memo ? "수업 내용: "+memo : ""}
-조건: 객관식 3문제(보기 4개), 주관식 2문제, 중학생 수준.
-아래 JSON 배열만 출력하고 다른 텍스트 없이:
+조건: 객관식 ${mcCount}문제(보기 4개), 주관식 ${saCount}문제, 중학생 수준.
+아래 JSON 배열만 출력하고 다른 텍스트 없이. 각 문제의 type은 순서대로 [${typeList.map(t=>`"${t}"`).join(",")}] 로 설정:
 [
-  {"type":"객관식","question":"문제내용","options":["①보기1","②보기2","③보기3","④보기4"],"answer":"①보기1","explanation":"해설"},
-  {"type":"객관식","question":"문제내용","options":["①보기1","②보기2","③보기3","④보기4"],"answer":"②보기2","explanation":"해설"},
-  {"type":"객관식","question":"문제내용","options":["①보기1","②보기2","③보기3","④보기4"],"answer":"③보기3","explanation":"해설"},
-  {"type":"주관식","question":"문제내용","options":[],"answer":"정답","explanation":"해설"},
-  {"type":"주관식","question":"문제내용","options":[],"answer":"정답","explanation":"해설"}
+${typeList.map(t => t==="객관식"
+  ? `  {"type":"객관식","question":"문제내용","options":["①보기1","②보기2","③보기3","④보기4"],"answer":"①보기1","explanation":"해설"}`
+  : `  {"type":"주관식","question":"문제내용","options":[],"answer":"정답","explanation":"해설"}`
+).join(",\n")}
 ]`;
       const raw = await gemini(prompt);
       const parsed = parseJSON(raw);
@@ -307,21 +313,65 @@ ${memo ? "수업 내용: "+memo : ""}
 
   const save = async () => {
     if (!qs.length) return;
-    const quiz = {id:Date.now().toString(),title,subject,grade,cls,questions:qs,createdAt:new Date().toISOString()};
+    const quiz = {id:Date.now().toString(),title,subject,school,grade,questions:qs,createdAt:new Date().toISOString()};
     await onSave([quiz,...quizzes]);
     setSaved(true); setTimeout(()=>{setSaved(false);onSwitch();},1200);
   };
+
+  const Counter = ({label, value, setValue, color}) => (
+    <div style={{flex:1, background:color.bg, borderRadius:12, padding:"14px 16px", border:`2px solid ${color.border}`}}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
+        <div style={{fontWeight:700, fontSize:13, color:color.text}}>{label}</div>
+        <div style={{fontSize:22, fontWeight:900, color:color.text}}>{value}<span style={{fontSize:13, fontWeight:500, color:"#94A3B8"}}>/5</span></div>
+      </div>
+      <div style={{display:"flex", gap:4}}>
+        {[0,1,2,3,4,5].map(n => (
+          <button key={n} onClick={()=>setValue(n)} style={{
+            flex:1, padding:"7px 0", border:"none", cursor:"pointer", borderRadius:6,
+            background: value===n ? color.text : "white",
+            color: value===n ? "white" : color.text,
+            fontWeight:700, fontSize:13, transition:"all 0.15s"
+          }}>{n}</button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div>
       <div style={{background:"white",borderRadius:14,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",marginBottom:20}}>
         <h2 style={{margin:"0 0 18px",fontSize:16,fontWeight:700,color:DK}}>✨ AI 문제 자동 생성</h2>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>퀴즈 제목 *</label><input style={INP} placeholder="예: 3학년 빛의 굴절 형성평가" value={title} onChange={e=>setTitle(e.target.value)}/></div>
+          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>퀴즈 제목 *</label><input style={INP} placeholder="예: 빛의 굴절(2-1)" value={title} onChange={e=>setTitle(e.target.value)}/></div>
           <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>수업 주제 *</label><input style={INP} placeholder="예: 볼록렌즈와 오목렌즈" value={subject} onChange={e=>setSubject(e.target.value)}/></div>
+          <div>
+            <label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>학교급</label>
+            <select value={school} onChange={e=>setSchool(e.target.value)} style={{...INP, background:"white", cursor:"pointer"}}>
+              <option value="">선택하세요</option>
+              <option value="초등학교">초등학교</option>
+              <option value="중학교">중학교</option>
+              <option value="고등학교">고등학교</option>
+            </select>
+          </div>
           <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>학년</label><input style={INP} placeholder="예: 3" value={grade} onChange={e=>setGrade(e.target.value)}/></div>
-          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>반</label><input style={INP} placeholder="예: 2" value={cls} onChange={e=>setCls(e.target.value)}/></div>
         </div>
+
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:8}}>📝 문항 구성 (총 {mcCount + saCount}문제)</label>
+          <div style={{display:"flex", gap:10}}>
+            <Counter
+              label="선택형 (객관식)"
+              value={mcCount} setValue={setMcCount}
+              color={{bg:"#EFF6FF", border:"#BFDBFE", text:"#1D4ED8"}}
+            />
+            <Counter
+              label="서술형 (주관식)"
+              value={saCount} setValue={setSaCount}
+              color={{bg:"#FFF7ED", border:"#FED7AA", text:"#C2410C"}}
+            />
+          </div>
+        </div>
+
         <div style={{marginBottom:14}}>
           <label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>수업 내용 추가 설명 <span style={{fontWeight:400,color:"#94A3B8"}}>(선택)</span></label>
           <textarea style={{...INP,height:80,resize:"vertical"}} placeholder="오늘 수업에서 배운 내용을 간단히 입력하면 더 좋은 문제가 나옵니다." value={memo} onChange={e=>setMemo(e.target.value)}/>
@@ -383,7 +433,7 @@ function ListTab({quizzes, onSave}) {
           <div style={{padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
             <div style={{flex:1,cursor:"pointer"}} onClick={() => toggle(q.id)}>
               <div style={{fontWeight:700,fontSize:15,color:DK,marginBottom:3}}>{q.title}</div>
-              <div style={{fontSize:12,color:"#64748B"}}>📚 {q.subject} {q.grade&&`· ${q.grade}학년`}{q.cls&&` ${q.cls}반`} · {q.questions?.length||0}문제 · {new Date(q.createdAt).toLocaleDateString()}</div>
+              <div style={{fontSize:12,color:"#64748B"}}>📚 {q.subject} {q.school&&`· ${q.school}`}{q.grade&&` ${q.grade}학년`} · {q.questions?.length||0}문제 · {new Date(q.createdAt).toLocaleDateString()}</div>
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0}}>
               <button onClick={()=>toggle(q.id)} style={B("white",PU,{border:`1px solid ${PU}`,fontSize:12,padding:"6px 12px"})}>{exp[q.id]?"접기":"문제보기"}</button>
@@ -425,7 +475,7 @@ function QRTab({quizzes}) {
             <div key={q.id} onClick={()=>setSelId(q.id)} style={{background:"white",borderRadius:12,padding:16,cursor:"pointer",border:selId===q.id?`2px solid ${PU}`:"2px solid transparent",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",transition:"all 0.15s"}}>
               <div style={{fontSize:26,marginBottom:8}}>📋</div>
               <div style={{fontWeight:700,fontSize:13,color:DK,marginBottom:3,lineHeight:1.4}}>{q.title}</div>
-              <div style={{fontSize:11,color:"#94A3B8",marginBottom:6}}>{q.grade&&`${q.grade}학년 `}{q.cls&&`${q.cls}반`}</div>
+              <div style={{fontSize:11,color:"#94A3B8",marginBottom:6}}>{q.school&&`${q.school} `}{q.grade&&`${q.grade}학년`}</div>
               <div style={{fontSize:11,background:"#F3F0FF",color:PU,borderRadius:5,padding:"2px 7px",display:"inline-block",fontWeight:700,letterSpacing:1}}>#{sc(q.id)}</div>
             </div>
           ))}
@@ -458,7 +508,7 @@ function ResultsTab({quizzes, uid}) {
     const rows=sorted.map(r=>({"학번":r.studentId,"점수":r.submitted?r.score:"미제출","총점":total,"제출여부":r.submitted?"제출":"미제출","제출시간":r.submittedAt||""}));
     const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,"퀴즈결과");
-    XLSX.writeFile(wb,`${quiz.title}_${quiz.grade||""}학년_${quiz.cls||""}반.xlsx`);
+    XLSX.writeFile(wb,`${quiz.title}_${quiz.school||""}_${quiz.grade||""}학년.xlsx`);
   };
   return (
     <div>
