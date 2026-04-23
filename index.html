@@ -55,9 +55,9 @@ const DB={
 
 // ── AI ────────────────────────────────────────────────────
 async function askAI(msgs,sys){
-  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${CFG.apiKey}`,{
+  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${CFG.apiKey}`,{
     method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({system_instruction:{parts:[{text:sys}]},contents:msgs,generationConfig:{maxOutputTokens:1000,temperature:0}}),
+    body:JSON.stringify({system_instruction:{parts:[{text:sys}]},contents:msgs,generationConfig:{maxOutputTokens:1000,temperature:0,thinkingConfig:{thinkingBudget:0}}}),
   });
   const d=await res.json();
   if(d.error)throw new Error(d.error.message);
