@@ -13,10 +13,26 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Firebase SDK (Auth 포함) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
   <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Segoe UI',system-ui,sans-serif;}</style>
 </head>
 <body>
 <div id="root"></div>
+<script>
+// Firebase 초기화
+const firebaseConfig = {
+  apiKey: "AIzaSyCEfanJFvovY499hYXKaxkJnI2WZqG6ydU",
+  authDomain: "assess-ai-77355.firebaseapp.com",
+  databaseURL: "https://assess-ai-77355-default-rtdb.firebaseio.com",
+  projectId: "assess-ai-77355",
+  storageBucket: "assess-ai-77355.firebasestorage.app",
+  messagingSenderId: "36791489485",
+  appId: "1:36791489485:web:937b4ed1dd67af92b4aa84"
+};
+firebase.initializeApp(firebaseConfig);
+</script>
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
@@ -25,15 +41,11 @@ const btn=(bg,col="white",ex={})=>({padding:"10px 20px",background:bg,color:col,
 const inp={padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSize:14,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"};
 const shortCode=id=>id?id.slice(-6).toUpperCase():"";
 
-// ── 설정 ─────────────────────────────────────────────────
-// Firebase URL은 코드에 직접 입력 (보안 경고 없음)
 const FIREBASE_URL = "https://assess-ai-77355-default-rtdb.firebaseio.com";
 
 const CFG={
-  get fbUrl(){return FIREBASE_URL;},
   get apiKey(){return localStorage.getItem("aai_key")||"";},
   set apiKey(v){localStorage.setItem("aai_key",v);},
-  get ready(){return !!FIREBASE_URL;},
 };
 
 async function loadGeminiKey(){
@@ -45,15 +57,48 @@ async function loadGeminiKey(){
   }catch{return false;}
 }
 
-// ── Firebase ──────────────────────────────────────────────
+// ── Firebase DB (교사별로 분리) ────────────────────────────
 const DB={
-  async getA(){try{const r=await fetch(`${CFG.fbUrl}/assessments.json`);const d=await r.json();if(!d)return[];return Object.values(d).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));}catch{return[];}},
-  async setA(arr){const obj={};arr.forEach(a=>{obj[a.id]=a;});await fetch(`${CFG.fbUrl}/assessments.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});},
-  async getR(id){try{const r=await fetch(`${CFG.fbUrl}/results/${id}.json`);const d=await r.json();if(!d)return[];return Object.values(d);}catch{return[];}},
-  async setR(id,arr){const obj={};arr.forEach(r=>{obj[r.studentId.replace(/[.#$/[\]\s]/g,"_")]=r;});await fetch(`${CFG.fbUrl}/results/${id}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});},
+  async getA(uid){
+    try{
+      const path = uid ? `assessments/${uid}` : `assessments`;
+      const r=await fetch(`${FIREBASE_URL}/${path}.json`);
+      const d=await r.json();
+      if(!d)return[];
+      return Object.values(d).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+    }catch{return[];}
+  },
+  async setA(uid, arr){
+    const obj={};arr.forEach(a=>{obj[a.id]=a;});
+    await fetch(`${FIREBASE_URL}/assessments/${uid}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
+  },
+  // 학생이 접근할 때는 모든 교사의 평가에서 검색
+  async findAssessment(asmId){
+    try{
+      const r=await fetch(`${FIREBASE_URL}/assessments.json`);
+      const d=await r.json();
+      if(!d)return null;
+      for(const uid of Object.keys(d)){
+        if(d[uid][asmId])return {...d[uid][asmId], _ownerUid:uid};
+      }
+      return null;
+    }catch{return null;}
+  },
+  async getR(uid, id){
+    try{
+      const r=await fetch(`${FIREBASE_URL}/results/${uid}/${id}.json`);
+      const d=await r.json();
+      if(!d)return[];
+      return Object.values(d);
+    }catch{return[];}
+  },
+  async setR(uid, id, arr){
+    const obj={};
+    arr.forEach(r=>{obj[r.studentId.replace(/[.#$/[\]\s]/g,"_")]=r;});
+    await fetch(`${FIREBASE_URL}/results/${uid}/${id}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
+  },
 };
 
-// ── AI ────────────────────────────────────────────────────
 async function askAI(msgs,sys){
   const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${CFG.apiKey}`,{
     method:"POST",headers:{"Content-Type":"application/json"},
@@ -64,7 +109,6 @@ async function askAI(msgs,sys){
   return d.candidates[0].content.parts.filter(p=>p.text).map(p=>p.text).join("");
 }
 
-// ── QR ───────────────────────────────────────────────────
 function QRImage({url}){
   const ref=useRef(null);
   useEffect(()=>{
@@ -85,67 +129,92 @@ function Center({children}){return<div style={{display:"flex",alignItems:"center
 function App(){
   const [mode,setMode]=useState("loading");
   const [sAsmId,setSAsmId]=useState(null);
-  const [configured,setConfigured]=useState(true);
+  const [sOwnerUid,setSOwnerUid]=useState(null);
+  const [user,setUser]=useState(null);
 
   useEffect(()=>{
     const init=async()=>{
       await loadGeminiKey();
-      setConfigured(true); // 키 로딩 성공 여부와 관계없이 진행
+
       const params=new URLSearchParams(window.location.search);
       const sid=params.get("id");
       const code=params.get("code");
-      const h=window.location.hash;
-      if(sid){setSAsmId(sid);setMode("student");return;}
-      if(code){
-        const asms=await DB.getA();
-        const found=asms.find(a=>shortCode(a.id)===code.toUpperCase());
-        if(found){setSAsmId(found.id);setMode("student");return;}
+
+      // 학생 모드 처리
+      if(sid){
+        const asm=await DB.findAssessment(sid);
+        if(asm){setSAsmId(sid);setSOwnerUid(asm._ownerUid);setMode("student");return;}
       }
-      if(h.startsWith("#s/")){setSAsmId(decodeURIComponent(h.slice(3)));setMode("student");return;}
-      setMode("teacher");
+      if(code){
+        // 코드로 검색 (모든 교사의 평가에서)
+        try{
+          const r=await fetch(`${FIREBASE_URL}/assessments.json`);
+          const d=await r.json();
+          if(d){
+            for(const uid of Object.keys(d)){
+              for(const aid of Object.keys(d[uid])){
+                if(shortCode(aid)===code.toUpperCase()){
+                  setSAsmId(aid);setSOwnerUid(uid);setMode("student");return;
+                }
+              }
+            }
+          }
+        }catch{}
+      }
+
+      // 교사 모드 - 로그인 상태 확인
+      firebase.auth().onAuthStateChanged(u=>{
+        setUser(u);
+        setMode(u?"teacher":"login");
+      });
     };
     init();
   },[]);
-  if(mode==="student")return<StudentPage asmId={sAsmId}/>;
-  if(!configured)return<SetupPage onDone={()=>setConfigured(true)}/>;
-  return<TeacherApp onSetup={()=>setConfigured(false)}/>;
+
+  if(mode==="loading")return<Center><div style={{color:"#94A3B8"}}>로딩 중...</div></Center>;
+  if(mode==="student")return<StudentPage asmId={sAsmId} ownerUid={sOwnerUid}/>;
+  if(mode==="login")return<LoginPage/>;
+  return<TeacherApp user={user}/>;
 }
 
 // ══════════════════════════════════════════════════════════
-// 설정 페이지 (Firebase URL만 입력)
+// 로그인 페이지
 // ══════════════════════════════════════════════════════════
-function SetupPage({onDone}){
-  const [fb,setFb]=useState(CFG.fbUrl);
-  const [loading,setLoading]=useState(false);
-
-  const save=async()=>{
-    if(!fb.trim())return alert("Firebase URL을 입력해주세요.");
-    setLoading(true);
-    CFG.fbUrl=fb.trim().replace(/\/$/,"");
-    const ok=await loadGeminiKey();
-    setLoading(false);
-    if(!ok)return alert("Firebase에서 API 키를 불러오지 못했습니다.\nFirebase 데이터에 config → geminiKey 가 있는지 확인해주세요.");
-    onDone();
+function LoginPage(){
+  const login=async()=>{
+    const provider=new firebase.auth.GoogleAuthProvider();
+    try{
+      await firebase.auth().signInWithPopup(provider);
+    }catch(e){
+      alert("로그인 오류: "+e.message);
+    }
   };
-
   return(
     <Center>
-      <div style={{background:"white",borderRadius:20,padding:40,width:460,boxShadow:"0 16px 48px rgba(0,0,0,0.12)"}}>
-        <div style={{textAlign:"center",marginBottom:28}}>
-          <div style={{fontSize:40,marginBottom:10}}>🔬</div>
-          <h1 style={{fontSize:22,fontWeight:900,color:BL}}>ASSESS AI</h1>
-          <p style={{color:"#64748B",fontSize:13,marginTop:6}}>Firebase URL을 입력하면 바로 시작할 수 있습니다</p>
-        </div>
-        <div style={{marginBottom:28}}>
-          <label style={{fontSize:13,fontWeight:700,color:DK,display:"block",marginBottom:6}}>Firebase Realtime Database URL</label>
-          <input style={inp} value={fb} onChange={e=>setFb(e.target.value)} placeholder="https://프로젝트명-default-rtdb.firebaseio.com"/>
-          <div style={{fontSize:12,color:"#64748B",marginTop:8,lineHeight:1.8,background:"#F8FAFC",borderRadius:8,padding:12}}>
-            ✅ Gemini API 키는 Firebase에서 자동으로 불러옵니다
-          </div>
-        </div>
-        <button onClick={save} disabled={loading} style={btn(BL,undefined,{width:"100%",padding:"13px",fontSize:15,borderRadius:10,cursor:loading?"not-allowed":"pointer"})}>
-          {loading?"⏳ 불러오는 중...":"설정 완료 → 시작하기"}
+      <div style={{background:"white",borderRadius:20,padding:40,width:400,boxShadow:"0 16px 48px rgba(0,0,0,0.12)",textAlign:"center"}}>
+        <div style={{fontSize:48,marginBottom:12}}>🔬</div>
+        <h1 style={{fontSize:26,fontWeight:900,color:BL,marginBottom:8}}>ASSESS AI</h1>
+        <p style={{color:"#64748B",fontSize:14,marginBottom:28,lineHeight:1.7}}>
+          AI 기반 학생 질문 수행평가 시스템<br/>
+          <span style={{fontSize:12,color:"#94A3B8"}}>교사용 관리 페이지</span>
+        </p>
+        <button onClick={login} style={{
+          width:"100%",padding:"14px",background:"white",border:"1px solid #E2E8F0",
+          borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:12,
+          fontSize:15,fontWeight:600,color:"#334155",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+          </svg>
+          Google 계정으로 로그인
         </button>
+        <p style={{fontSize:11,color:"#94A3B8",marginTop:16,lineHeight:1.7}}>
+          로그인하면 본인이 만든 평가만 관리할 수 있습니다.<br/>
+          학생들은 로그인 없이 QR 코드로 접속합니다.
+        </p>
       </div>
     </Center>
   );
@@ -154,13 +223,19 @@ function SetupPage({onDone}){
 // ══════════════════════════════════════════════════════════
 // 교사 앱
 // ══════════════════════════════════════════════════════════
-function TeacherApp({onSetup}){
+function TeacherApp({user}){
   const [tab,setTab]=useState("criteria");
   const [asms,setAsms]=useState([]);
   const [ready,setReady]=useState(false);
-  useEffect(()=>{DB.getA().then(a=>{setAsms(a);setReady(true);});},[] );
-  const save=async next=>{await DB.setA(next);setAsms(next);};
+  const [menuOpen,setMenuOpen]=useState(false);
+
+  useEffect(()=>{DB.getA(user.uid).then(a=>{setAsms(a);setReady(true);});},[user.uid]);
+
+  const save=async next=>{await DB.setA(user.uid, next);setAsms(next);};
+  const logout=async()=>{await firebase.auth().signOut();window.location.reload();};
+
   const TABS=[["criteria","📝 평가기준"],["qr","📱 QR코드"],["results","📊 결과확인"],["enter","🎓 학생입장"]];
+
   return(
     <div style={{minHeight:"100vh",background:"#F1F5F9"}}>
       <header style={{background:BL,color:"white",padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",height:54}}>
@@ -169,16 +244,34 @@ function TeacherApp({onSetup}){
           <span style={{height:16,width:1,background:"rgba(255,255,255,0.3)"}}/>
           <span style={{fontSize:12,opacity:0.7}}>교사용 관리 페이지</span>
         </div>
-        <button onClick={onSetup} style={{fontSize:11,background:"rgba(255,255,255,0.15)",border:"none",color:"white",borderRadius:6,padding:"4px 10px",cursor:"pointer"}}>⚙ 설정</button>
+        <div style={{position:"relative"}}>
+          <button onClick={()=>setMenuOpen(!menuOpen)} style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.15)",border:"none",borderRadius:20,padding:"4px 12px 4px 4px",cursor:"pointer",color:"white"}}>
+            {user.photoURL ? <img src={user.photoURL} alt="" style={{width:28,height:28,borderRadius:"50%"}}/> : <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(255,255,255,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>👤</div>}
+            <span style={{fontSize:12,fontWeight:600}}>{user.displayName||"선생님"}</span>
+          </button>
+          {menuOpen && (
+            <div style={{position:"absolute",top:"110%",right:0,background:"white",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,0.15)",minWidth:200,zIndex:100,overflow:"hidden"}}>
+              <div style={{padding:"12px 14px",borderBottom:"1px solid #E2E8F0"}}>
+                <div style={{fontSize:13,fontWeight:700,color:DK}}>{user.displayName}</div>
+                <div style={{fontSize:11,color:"#64748B",marginTop:2}}>{user.email}</div>
+              </div>
+              <button onClick={logout} style={{width:"100%",padding:"11px 14px",border:"none",background:"none",cursor:"pointer",textAlign:"left",fontSize:13,color:"#DC2626",fontWeight:600}}>
+                🚪 로그아웃
+              </button>
+            </div>
+          )}
+        </div>
       </header>
+
       <div style={{background:"white",borderBottom:"1px solid #E2E8F0",display:"flex",paddingLeft:12}}>
         {TABS.map(([id,label])=>(<button key={id} onClick={()=>setTab(id)} style={{padding:"12px 16px",border:"none",background:"none",cursor:"pointer",fontWeight:tab===id?700:500,fontSize:13,color:tab===id?BL:"#64748B",borderBottom:tab===id?`2px solid ${BL}`:"2px solid transparent"}}>{label}</button>))}
       </div>
+
       <main style={{maxWidth:960,margin:"0 auto",padding:"24px 20px"}}>
         {!ready?<Empty icon="⏳" text="로딩 중..."/>:<>
           {tab==="criteria"&&<CriteriaTab asms={asms} onSave={save}/>}
           {tab==="qr"&&<QRTab asms={asms}/>}
-          {tab==="results"&&<ResultsTab asms={asms}/>}
+          {tab==="results"&&<ResultsTab asms={asms} uid={user.uid}/>}
           {tab==="enter"&&<StudentEnterTab asms={asms}/>}
         </>}
       </main>
@@ -186,7 +279,6 @@ function TeacherApp({onSetup}){
   );
 }
 
-// ── 평가기준 탭 ───────────────────────────────────────────
 function CriteriaTab({asms,onSave}){
   const empty={title:"",subject:"",grade:"",cls:"",criteria:"",maxScore:10};
   const [form,setForm]=useState(empty);
@@ -235,7 +327,6 @@ function CriteriaTab({asms,onSave}){
   );
 }
 
-// ── QR 탭 ─────────────────────────────────────────────────
 function QRTab({asms}){
   const [selId,setSelId]=useState(null);
   const sel=asms.find(a=>a.id===selId);
@@ -270,12 +361,11 @@ function QRTab({asms}){
   );
 }
 
-// ── 결과 탭 ───────────────────────────────────────────────
-function ResultsTab({asms}){
+function ResultsTab({asms, uid}){
   const [selId,setSelId]=useState("");
   const [results,setResults]=useState([]);
   const [exp,setExp]=useState({});
-  useEffect(()=>{if(!selId)return;const load=()=>DB.getR(selId).then(setResults);load();const iv=setInterval(load,4000);return()=>clearInterval(iv);},[selId]);
+  useEffect(()=>{if(!selId)return;const load=()=>DB.getR(uid, selId).then(setResults);load();const iv=setInterval(load,4000);return()=>clearInterval(iv);},[selId, uid]);
   const sorted=[...results].sort((a,b)=>b.studentId.localeCompare(a.studentId));
   const asm=asms.find(a=>a.id===selId);
   const toggle=k=>setExp(p=>({...p,[k]:!p[k]}));
@@ -342,7 +432,6 @@ function ResultsTab({asms}){
   );
 }
 
-// ── 학생 입장 탭 ──────────────────────────────────────────
 function StudentEnterTab({asms}){
   const [code,setCode]=useState("");const [err,setErr]=useState("");
   const enter=()=>{
@@ -368,7 +457,7 @@ function StudentEnterTab({asms}){
 // ══════════════════════════════════════════════════════════
 // 학생 페이지
 // ══════════════════════════════════════════════════════════
-function StudentPage({asmId}){
+function StudentPage({asmId, ownerUid}){
   const [asm,setAsm]=useState(null);const [ready,setReady]=useState(false);
   const [sid,setSid]=useState("");const [confirmed,setConfirmed]=useState("");
   const [msgs,setMsgs]=useState([]);const [input,setInput]=useState("");
@@ -376,22 +465,22 @@ function StudentPage({asmId}){
   const [submitted,setSubmitted]=useState(false);const [finalQ,setFinalQ]=useState("");
   const chatRef=useRef(null);
 
-  useEffect(()=>{DB.getA().then(list=>{setAsm(list.find(a=>a.id===asmId)||null);setReady(true);});},[asmId]);
+  useEffect(()=>{DB.findAssessment(asmId).then(a=>{setAsm(a);setReady(true);});},[asmId]);
   useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[msgs,loading]);
   useEffect(()=>{
-    if(!confirmed||!asmId)return;
-    DB.getR(asmId).then(results=>{
+    if(!confirmed||!asmId||!ownerUid)return;
+    DB.getR(ownerUid, asmId).then(results=>{
       const ex=results.find(r=>r.studentId===confirmed);
       if(ex){setMsgs(ex.messages||[]);setBest(ex.bestScore||0);setSubmitted(ex.submitted||false);setFinalQ(ex.finalQuestion||"");}
     });
-  },[confirmed,asmId]);
+  },[confirmed,asmId,ownerUid]);
 
   const persist=async(m,bst,sub,fq)=>{
-    const results=await DB.getR(asmId);
+    const results=await DB.getR(ownerUid, asmId);
     const idx=results.findIndex(r=>r.studentId===confirmed);
     const entry={studentId:confirmed,messages:m,bestScore:bst,finalScore:bst,finalQuestion:fq,submitted:sub,updatedAt:new Date().toISOString()};
     if(idx>=0)results[idx]=entry;else results.push(entry);
-    await DB.setR(asmId,results);
+    await DB.setR(ownerUid, asmId, results);
   };
 
   const send=async()=>{
