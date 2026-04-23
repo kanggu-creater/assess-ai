@@ -26,17 +26,19 @@ const inp={padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSiz
 const shortCode=id=>id?id.slice(-6).toUpperCase():"";
 
 // ── 설정 ─────────────────────────────────────────────────
+// Firebase URL은 코드에 직접 입력 (보안 경고 없음)
+const FIREBASE_URL = "https://assess-ai-77355-default-rtdb.firebaseio.com";
+
 const CFG={
-  get fbUrl(){return localStorage.getItem("aai_fb")||"";},
-  set fbUrl(v){localStorage.setItem("aai_fb",v);},
+  get fbUrl(){return FIREBASE_URL;},
   get apiKey(){return localStorage.getItem("aai_key")||"";},
   set apiKey(v){localStorage.setItem("aai_key",v);},
-  get ready(){return !!this.fbUrl;},
+  get ready(){return !!FIREBASE_URL;},
 };
 
 async function loadGeminiKey(){
   try{
-    const r=await fetch(`${CFG.fbUrl}/config/geminiKey.json`);
+    const r=await fetch(`${FIREBASE_URL}/config/geminiKey.json`);
     const d=await r.json();
     if(d&&typeof d==="string"){CFG.apiKey=d;return true;}
     return false;
@@ -87,10 +89,7 @@ function App(){
 
   useEffect(()=>{
     const init=async()=>{
-      if(CFG.fbUrl){
-        await loadGeminiKey();
-        setConfigured(true);
-      }
+      await loadGeminiKey();
       const params=new URLSearchParams(window.location.search);
       const sid=params.get("id");
       const code=params.get("code");
@@ -106,8 +105,6 @@ function App(){
     };
     init();
   },[]);
-
-  if(mode==="loading")return null;
   if(mode==="student")return<StudentPage asmId={sAsmId}/>;
   if(!configured)return<SetupPage onDone={()=>setConfigured(true)}/>;
   return<TeacherApp onSetup={()=>setConfigured(false)}/>;
