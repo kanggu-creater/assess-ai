@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>ASSESS AI</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <meta name="theme-color" content="#1D4ED8"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="ASSESS AI"/>
+  <link rel="manifest" href="data:application/json;charset=utf-8,{
+    &quot;name&quot;: &quot;ASSESS AI&quot;,
+    &quot;short_name&quot;: &quot;ASSESS AI&quot;,
+    &quot;description&quot;: &quot;중학교 과학 수행평가 시스템&quot;,
+    &quot;start_url&quot;: &quot;.&quot;,
+    &quot;display&quot;: &quot;standalone&quot;,
+    &quot;background_color&quot;: &quot;#F1F5F9&quot;,
+    &quot;theme_color&quot;: &quot;#1D4ED8&quot;,
+    &quot;icons&quot;: [{
+      &quot;src&quot;: &quot;https://api.dicebear.com/7.x/initials/svg?seed=AI&amp;backgroundColor=1D4ED8&amp;textColor=ffffff&quot;,
+      &quot;sizes&quot;: &quot;192x192&quot;,
+      &quot;type&quot;: &quot;image/svg+xml&quot;
+    }]
+  }"/>
+  <style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Segoe UI',system-ui,sans-serif;}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ██████████████████████████████████████████████████████████
+// ★ 아래 두 줄에 본인의 값을 입력하세요 ★
+const FIREBASE_URL = "";
+// Gemini API 키는 Firebase에서 자동으로 불러옵니다
+// ██████████████████████████████████████████████████████████
+
+// ── 상수 ──────────────────────────────────────────────────
+const BL="#1D4ED8", DK="#1E293B";
+const btn=(bg,col="white",ex={})=>({padding:"10px 20px",background:bg,color:col,border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:14,...ex});
+const inp={padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSize:14,width:"100%",boxSizing:"border-box",outline:"none",fontFamily:"inherit"};
+const shortCode=id=>id?id.slice(-6).toUpperCase():"";
+
+// ── 설정 ─────────────────────────────────────────────────
+const CFG={
+  get fbUrl(){return FIREBASE_URL||localStorage.getItem("aai_fb")||"";},
+  set fbUrl(v){localStorage.setItem("aai_fb",v);},
+  get apiKey(){return localStorage.getItem("aai_key")||"";},
+  set apiKey(v){localStorage.setItem("aai_key",v);},
+  get ready(){return !!(this.fbUrl);},
+};
+
+// Firebase에서 Gemini 키 불러오기
+async function loadGeminiKey(fbUrl) {
+  try {
+    const r = await fetch(`${fbUrl}/config/geminiKey.json`);
+    const d = await r.json();
+    if (d && typeof d === "string") {
+      CFG.apiKey = d;
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
+// ── Firebase REST 저장소 ──────────────────────────────────
+const DB={
+  async getA(){
+    try{
+      const r=await fetch(`${CFG.fbUrl}/assessments.json`);
+      const d=await r.json();
+      if(!d)return[];
+      return Object.values(d).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+    }catch{return[];}
+  },
+  async setA(arr){
+    const obj={};arr.forEach(a=>{obj[a.id]=a;});
+    await fetch(`${CFG.fbUrl}/assessments.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
+  },
+  async getR(id){
+    try{
+      const r=await fetch(`${CFG.fbUrl}/results/${id}.json`);
+      const d=await r.json();
+      if(!d)return[];
+      return Object.values(d);
+    }catch{return[];}
+  },
+  async setR(id,arr){
+    const obj={};
+    arr.forEach(r=>{obj[r.studentId.replace(/[.#$/[\]\s]/g,"_")]=r;});
+    await fetch(`${CFG.fbUrl}/results/${id}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
+  },
+};
+
+// ── AI 호출 (Gemini) ──────────────────────────────────────
+async function askAI(msgs,sys){
+  const contents=msgs.map(m=>({
+    role:m.role==="assistant"?"model":"user",
+    parts:[{text:m.role==="user"?m.content:JSON.stringify({answer:m.answer,score:m.score,feedback:m.feedback})}]
+  }));
+  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${CFG.apiKey}`,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      system_instruction:{parts:[{text:sys}]},
+      contents,
+      generationConfig:{maxOutputTokens:1500,temperature:0,thinkingConfig:{thinkingBudget:0}},
+    }),
+  });
+  const d=await res.json();
+  if(d.error)throw new Error(d.error.message);
+  // 텍스트 파트만 추출 (thinking 파트 제외)
+  const text=d.candidates[0].content.parts.filter(p=>p.text).map(p=>p.text).join("");
+  return text;
+}
+
+// 사용 모델: gemini-2.5-flash
+
+// ── QR 컴포넌트 ───────────────────────────────────────────
+function QRImage({url}){
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!url||!ref.current)return;
+    ref.current.innerHTML="";
+    const gen=()=>new window.QRCode(ref.current,{text:url,width:256,height:256,correctLevel:window.QRCode.CorrectLevel.M});
+    window.QRCode?gen():(()=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";s.onload=gen;document.head.appendChild(s);})();
+  },[url]);
+  return <div ref={ref} style={{lineHeight:0}}/>;
+}
+
+// ── 공통 컴포넌트 ─────────────────────────────────────────
+function Empty({icon,text}){return<div style={{textAlign:"center",padding:56,color:"#94A3B8"}}><div style={{fontSize:36,marginBottom:12}}>{icon}</div><div style={{fontSize:14}}>{text}</div></div>;}
+function Center({children}){return<div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"#F1F5F9"}}>{children}</div>;}
+
+// ══════════════════════════════════════════════════════════
+// ROOT
+// ══════════════════════════════════════════════════════════
+function App(){
+  const [mode,setMode]=useState("loading");
+  const [sAsmId,setSAsmId]=useState(null);
+  const [configured,setConfigured]=useState(CFG.ready);
+
+  useEffect(()=>{
+    const init = async () => {
+      if (CFG.fbUrl) await loadGeminiKey(CFG.fbUrl);
+      const parse=async()=>{
+      // 쿼리 파라미터 방식 (?id=, ?code=)
+      const params=new URLSearchParams(window.location.search);
+      const sid=params.get("id");
+      const code=params.get("code");
+      // 해시 방식 폴백 (#s/, #c/)
+      const h=window.location.hash;
+
+      if(sid){setSAsmId(sid);setMode("student");return;}
+      if(code){
+        const c=code.toUpperCase();
+        const asms=await DB.getA();
+        const found=asms.find(a=>shortCode(a.id)===c);
+        if(found){setSAsmId(found.id);setMode("student");return;}
+      }
+      if(h.startsWith("#s/")){setSAsmId(decodeURIComponent(h.slice(3)));setMode("student");return;}
+      if(h.startsWith("#c/")){
+        const c=h.slice(3).toUpperCase();
+        const asms=await DB.getA();
+        const found=asms.find(a=>shortCode(a.id)===c);
+        if(found){setSAsmId(found.id);setMode("student");return;}
+      }
+      setMode("teacher");
+    };
+    parse();
+    };
+    init();
+  },[]);
+
+  if(mode==="loading")return null;
+  if(!configured&&mode==="teacher")return<SetupPage onDone={()=>setConfigured(true)}/>;
+  if(mode==="student")return<StudentPage asmId={sAsmId}/>;
+  return<TeacherApp onSetup={()=>setConfigured(false)}/>;
+}
+
+// ══════════════════════════════════════════════════════════
+// 초기 설정 페이지
+// ══════════════════════════════════════════════════════════
+function SetupPage({onDone}){
+  const [fb,setFb]=useState(CFG.fbUrl);
+  const [key,setKey]=useState(CFG.apiKey);
+  const save=()=>{
+    if(!fb.trim()||!key.trim())return alert("두 항목 모두 입력해주세요.");
+    CFG.fbUrl=fb.trim().replace(/\/$/,"");
+    CFG.apiKey=key.trim();
+    onDone();
+  };
+  return(
+    <Center>
+      <div style={{background:"white",borderRadius:20,padding:40,width:500,boxShadow:"0 16px 48px rgba(0,0,0,0.12)"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{fontSize:40,marginBottom:10}}>⚙️</div>
+          <h1 style={{fontSize:22,fontWeight:900,color:BL}}>ASSESS AI 초기 설정</h1>
+          <p style={{color:"#64748B",fontSize:13,marginTop:6}}>아래 두 가지를 설정하면 바로 사용할 수 있습니다</p>
+        </div>
+
+        <div style={{marginBottom:20}}>
+          <label style={{fontSize:13,fontWeight:700,color:DK,display:"block",marginBottom:6}}>
+            1. Firebase Realtime Database URL
+          </label>
+          <input style={inp} value={fb} onChange={e=>setFb(e.target.value)} placeholder="https://프로젝트명-default-rtdb.firebaseio.com"/>
+          <div style={{fontSize:12,color:"#64748B",marginTop:8,lineHeight:1.8,background:"#F8FAFC",borderRadius:8,padding:12}}>
+            <strong>Firebase 무료 설정 방법 (5분):</strong><br/>
+            1. <a href="https://console.firebase.google.com" target="_blank" style={{color:BL}}>console.firebase.google.com</a> → 새 프로젝트 만들기<br/>
+            2. 좌측 메뉴 → Realtime Database → 데이터베이스 만들기<br/>
+            3. 규칙(Rules) 탭 → read/write를 <code style={{background:"#E2E8F0",padding:"1px 4px",borderRadius:3}}>true</code>로 변경 후 게시<br/>
+            4. 데이터(Data) 탭 상단 URL 복사하여 위에 붙여넣기
+          </div>
+        </div>
+
+        <div style={{marginBottom:28}}>
+          <label style={{fontSize:13,fontWeight:700,color:DK,display:"block",marginBottom:6}}>
+            2. Google Gemini API 키
+          </label>
+          <input style={inp} type="password" value={key} onChange={e=>setKey(e.target.value)} placeholder="AIza..."/>
+          <div style={{fontSize:12,color:"#64748B",marginTop:8,lineHeight:1.8,background:"#F8FAFC",borderRadius:8,padding:12}}>
+            <a href="https://aistudio.google.com/apikey" target="_blank" style={{color:BL}}>aistudio.google.com/apikey</a> → <strong>Create API Key</strong><br/>
+            ✅ 무료 사용 가능 · 신용카드 불필요
+          </div>
+        </div>
+
+        <button onClick={save} style={btn(BL,undefined,{width:"100%",padding:"13px",fontSize:15,borderRadius:10})}>
+          설정 완료 → 시작하기
+        </button>
+      </div>
+    </Center>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// 교사 앱
+// ══════════════════════════════════════════════════════════
+function TeacherApp({onSetup}){
+  const [tab,setTab]=useState("criteria");
+  const [asms,setAsms]=useState([]);
+  const [ready,setReady]=useState(false);
+  useEffect(()=>{DB.getA().then(a=>{setAsms(a);setReady(true);});},[] );
+  const save=async next=>{await DB.setA(next);setAsms(next);};
+  const TABS=[["criteria","📝 평가기준"],["qr","📱 QR코드"],["results","📊 결과확인"],["enter","🎓 학생입장"]];
+
+  return(
+    <div style={{minHeight:"100vh",background:"#F1F5F9"}}>
+      <header style={{background:BL,color:"white",padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",height:54}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:18,fontWeight:900}}>ASSESS AI</span>
+          <span style={{height:16,width:1,background:"rgba(255,255,255,0.3)"}}/>
+          <span style={{fontSize:12,opacity:0.7}}>교사용 관리 페이지</span>
+        </div>
+        <button onClick={onSetup} style={{fontSize:11,background:"rgba(255,255,255,0.15)",border:"none",color:"white",borderRadius:6,padding:"4px 10px",cursor:"pointer"}}>⚙ 설정</button>
+      </header>
+      <div style={{background:"white",borderBottom:"1px solid #E2E8F0",display:"flex",paddingLeft:12}}>
+        {TABS.map(([id,label])=>(
+          <button key={id} onClick={()=>setTab(id)} style={{padding:"12px 16px",border:"none",background:"none",cursor:"pointer",fontWeight:tab===id?700:500,fontSize:13,color:tab===id?BL:"#64748B",borderBottom:tab===id?`2px solid ${BL}`:"2px solid transparent"}}>{label}</button>
+        ))}
+      </div>
+      <main style={{maxWidth:960,margin:"0 auto",padding:"24px 20px"}}>
+        {!ready?<Empty icon="⏳" text="로딩 중..."/>:<>
+          {tab==="criteria"&&<CriteriaTab asms={asms} onSave={save}/>}
+          {tab==="qr"&&<QRTab asms={asms}/>}
+          {tab==="results"&&<ResultsTab asms={asms}/>}
+          {tab==="enter"&&<StudentEnterTab asms={asms}/>}
+        </>}
+      </main>
+    </div>
+  );
+}
+
+// ── 평가기준 탭 ───────────────────────────────────────────
+function CriteriaTab({asms,onSave}){
+  const empty={title:"",subject:"",grade:"",cls:"",criteria:"",maxScore:10};
+  const [form,setForm]=useState(empty);
+  const [editId,setEditId]=useState(null);
+  const [flash,setFlash]=useState(false);
+  const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+
+  const submit=async()=>{
+    if(!form.title.trim()||!form.criteria.trim())return alert("제목과 평가기준을 입력해주세요.");
+    const next=editId?asms.map(a=>a.id===editId?{...a,...form}:a):[{...form,id:Date.now().toString(),createdAt:new Date().toISOString()},...asms];
+    await onSave(next);setForm(empty);setEditId(null);setFlash(true);setTimeout(()=>setFlash(false),2000);
+  };
+  const del=async id=>{if(!confirm("삭제하시겠습니까?"))return;await onSave(asms.filter(a=>a.id!==id));};
+  const edit=a=>{setForm({title:a.title,subject:a.subject,grade:a.grade,cls:a.cls,criteria:a.criteria,maxScore:a.maxScore});setEditId(a.id);window.scrollTo({top:0,behavior:"smooth"});};
+
+  return(
+    <div>
+      <div style={{background:"white",borderRadius:14,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",marginBottom:20}}>
+        <h2 style={{margin:"0 0 18px",fontSize:16,fontWeight:700,color:DK}}>{editId?"✏️ 수정":"✨ 새 평가기준 작성"}</h2>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          {[["평가 제목 *","title","예: 3학년 – 세포 단원"],["수업 주제","subject","예: 세포의 구조"]].map(([l,k,p])=>(
+            <div key={k}><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>{l}</label><input style={inp} placeholder={p} value={form[k]} onChange={f(k)}/></div>
+          ))}
+          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>학년</label><input style={inp} placeholder="예: 3" value={form.grade} onChange={f("grade")}/></div>
+          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>반</label><input style={inp} placeholder="예: 2" value={form.cls} onChange={f("cls")}/></div>
+        </div>
+        <div style={{marginBottom:12}}>
+          <label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>평가기준 * <span style={{fontWeight:400,color:"#94A3B8"}}>— AI가 이 기준으로 채점합니다</span></label>
+          <textarea style={{...inp,height:120,resize:"vertical"}} placeholder={"예:\n1. 수업 내용 관련 질문인가? (3점)\n2. 심화 사고력이 드러나는가? (4점)\n3. 구체적이고 명확한가? (3점)"} value={form.criteria} onChange={f("criteria")}/>
+        </div>
+        <div style={{display:"flex",alignItems:"flex-end",gap:12}}>
+          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>최대 점수</label><input style={{...inp,width:100}} type="number" min="1" max="100" value={form.maxScore} onChange={f("maxScore")}/></div>
+          <div style={{display:"flex",gap:8}}>
+            {editId&&<button onClick={()=>{setEditId(null);setForm(empty);}} style={btn("white","#64748B",{border:"1px solid #E2E8F0"})}>취소</button>}
+            <button onClick={submit} style={btn(flash?"#10B981":BL)}>{flash?"✓ 저장됨!":editId?"수정 완료":"저장하기"}</button>
+          </div>
+        </div>
+      </div>
+      {asms.length>0&&<div>
+        <h3 style={{fontSize:14,fontWeight:700,color:DK,marginBottom:10}}>저장된 평가기준 ({asms.length}개)</h3>
+        {asms.map(a=>(
+          <div key={a.id} style={{background:"white",borderRadius:10,padding:"12px 16px",marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:14,color:DK,marginBottom:2}}>{a.title}</div>
+              <div style={{fontSize:12,color:"#64748B"}}>{a.subject&&`📚 ${a.subject}  `}{a.grade&&`${a.grade}학년 `}{a.cls&&`${a.cls}반  `}• 최대 {a.maxScore}점</div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>edit(a)} style={btn("white",BL,{border:`1px solid ${BL}`,fontSize:12,padding:"6px 12px"})}>수정</button>
+              <button onClick={()=>del(a.id)} style={btn("#FEF2F2","#DC2626",{border:"1px solid #FCA5A5",fontSize:12,padding:"6px 12px"})}>삭제</button>
+            </div>
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
+// ── QR 탭 ─────────────────────────────────────────────────
+function QRTab({asms}){
+  const [selId,setSelId]=useState(null);
+  const sel=asms.find(a=>a.id===selId);
+  const base=window.location.href.split(/[#?]/)[0];
+  const stuUrl=selId?`${base}?id=${selId}`:"";
+  const codeUrl=selId?`${base}?code=${shortCode(selId)}`:"";
+  return(
+    <div>
+      <p style={{color:"#64748B",fontSize:14,marginTop:0,marginBottom:16}}>평가기준을 클릭하면 QR코드가 바로 생성됩니다.</p>
+      {asms.length===0?<Empty icon="📝" text="먼저 평가기준 작성 탭에서 평가를 생성해주세요."/>:(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10,marginBottom:24}}>
+          {asms.map(a=>(
+            <div key={a.id} onClick={()=>setSelId(a.id)} style={{background:"white",borderRadius:12,padding:16,cursor:"pointer",border:selId===a.id?`2px solid ${BL}`:"2px solid transparent",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",transition:"all 0.15s"}}>
+              <div style={{fontSize:26,marginBottom:8}}>📋</div>
+              <div style={{fontWeight:700,fontSize:13,color:DK,marginBottom:3,lineHeight:1.4}}>{a.title}</div>
+              <div style={{fontSize:11,color:"#94A3B8",marginBottom:6}}>{a.grade&&`${a.grade}학년 `}{a.cls&&`${a.cls}반`}</div>
+              <div style={{fontSize:11,background:"#EFF6FF",color:BL,borderRadius:5,padding:"2px 7px",display:"inline-block",fontWeight:700,letterSpacing:1}}>#{shortCode(a.id)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {sel&&(
+        <div style={{background:"white",borderRadius:14,padding:28,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",display:"flex",flexDirection:"column",alignItems:"center"}}>
+          <h3 style={{margin:"0 0 4px",fontSize:17,fontWeight:700,color:DK}}>{sel.title}</h3>
+          {sel.subject&&<p style={{color:"#64748B",fontSize:13,margin:"0 0 4px"}}>📚 {sel.subject}</p>}
+          <p style={{color:"#94A3B8",fontSize:12,margin:"0 0 20px"}}>QR코드를 학생들에게 보여주세요</p>
+          <div style={{padding:10,border:"1px solid #E2E8F0",borderRadius:10,background:"white"}}><QRImage url={stuUrl}/></div>
+          <div style={{marginTop:16,background:"#EFF6FF",borderRadius:10,padding:"12px 24px",textAlign:"center"}}>
+            <div style={{fontSize:11,color:"#64748B",marginBottom:3}}>QR이 안 될 경우 — 학생 입장 코드</div>
+            <div style={{fontSize:26,fontWeight:900,color:BL,letterSpacing:4}}>#{shortCode(sel.id)}</div>
+            <div style={{fontSize:11,color:"#94A3B8",marginTop:3}}>학생입장 탭에서 입력</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 결과 탭 ───────────────────────────────────────────────
+function ResultsTab({asms}){
+  const [selId,setSelId]=useState("");
+  const [results,setResults]=useState([]);
+  const [exp,setExp]=useState({});
+  useEffect(()=>{
+    if(!selId)return;
+    const load=()=>DB.getR(selId).then(setResults);
+    load();const iv=setInterval(load,4000);return()=>clearInterval(iv);
+  },[selId]);
+  const sorted=[...results].sort((a,b)=>b.studentId.localeCompare(a.studentId));
+  const asm=asms.find(a=>a.id===selId);
+  const toggle=k=>setExp(p=>({...p,[k]:!p[k]}));
+
+  const download=()=>{
+    if(!asm)return;
+    const rows=[];
+    sorted.forEach(r=>{
+      const uM=r.messages?.filter(m=>m.role==="user")||[];
+      const aM=r.messages?.filter(m=>m.role==="assistant")||[];
+      uM.forEach((m,i)=>rows.push({"학번":r.studentId,"최종점수":r.submitted?r.finalScore:"미제출","최종질문":r.finalQuestion||"","질문":m.content,"AI답변":aM[i]?.answer||"","질문점수":aM[i]?.score??"","AI피드백":aM[i]?.feedback||"","제출여부":r.submitted?"제출":"미제출"}));
+    });
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"평가결과");
+    XLSX.writeFile(wb,`${asm.title}_${asm.grade||""}학년_${asm.cls||""}반.xlsx`);
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",gap:10,marginBottom:18,alignItems:"center",flexWrap:"wrap"}}>
+        <select value={selId} onChange={e=>setSelId(e.target.value)} style={{flex:1,minWidth:200,padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSize:13,outline:"none",cursor:"pointer"}}>
+          <option value="">📋 평가를 선택하세요</option>
+          {asms.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}
+        </select>
+        {selId&&<div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,color:"#94A3B8"}}>● 4초마다 자동갱신</span>
+          <button onClick={download} style={btn("#059669",undefined,{whiteSpace:"nowrap",fontSize:13,padding:"9px 16px"})}>⬇ 엑셀 다운로드</button>
+        </div>}
+      </div>
+      {selId&&sorted.length===0&&<Empty icon="⏳" text="아직 참여한 학생이 없습니다."/>}
+      {sorted.length>0&&(
+        <div style={{background:"white",borderRadius:14,overflow:"auto",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{background:"#F8FAFC"}}>
+                {["학번","최종점수","최종질문","학생질문 / AI답변"].map((h,i)=>(
+                  <th key={h} style={{padding:"11px 13px",textAlign:i===1?"center":"left",fontWeight:600,color:"#475569",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r,ri)=>{
+                const uM=r.messages?.filter(m=>m.role==="user")||[];
+                const aM=r.messages?.filter(m=>m.role==="assistant")||[];
+                const rowExp=exp[r.studentId];
+                return(
+                  <tr key={r.studentId} style={{borderBottom:"1px solid #E2E8F0",background:ri%2===0?"white":"#FAFBFC"}}>
+                    <td style={{padding:"12px 13px",fontWeight:700,color:DK,whiteSpace:"nowrap"}}>{r.studentId}</td>
+                    <td style={{padding:"12px 13px",textAlign:"center"}}>
+                      {r.submitted?<span style={{background:"#DCFCE7",color:"#166534",padding:"3px 10px",borderRadius:20,fontWeight:700}}>{r.finalScore}점</span>:<span style={{color:"#94A3B8",fontSize:12}}>진행중</span>}
+                    </td>
+                    <td style={{padding:"12px 13px",maxWidth:160,fontSize:12,color:"#334155",lineHeight:1.5}}>{r.finalQuestion||<span style={{color:"#CBD5E1"}}>미제출</span>}</td>
+                    <td style={{padding:"12px 13px",minWidth:300}}>
+                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                        {(rowExp?uM:uM.slice(0,1)).map((m,i)=>{
+                          const ans=aM[i];const ak=`${r.studentId}_${i}`;const aExp=exp[ak];
+                          return(
+                            <div key={i} style={{background:"#F8FAFC",borderRadius:8,padding:9}}>
+                              <div style={{fontWeight:600,color:DK,fontSize:12,marginBottom:5}}>Q. {m.content}</div>
+                              {ans&&<><div style={{fontSize:11,color:"#475569",lineHeight:1.5,...(aExp?{}:{overflow:"hidden",display:"-webkit-box",WebkitLineClamp:1,WebkitBoxOrient:"vertical"})}}><span style={{color:BL,fontWeight:600}}>A. </span>{ans.answer}</div>
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
+                                <button onClick={()=>toggle(ak)} style={{fontSize:10,color:BL,background:"none",border:"none",cursor:"pointer",padding:0,fontWeight:600}}>{aExp?"▲ 접기":"▼ 전체보기"}</button>
+                                {ans.score!==undefined&&<span style={{fontSize:11,background:"#EFF6FF",color:BL,padding:"1px 7px",borderRadius:10,fontWeight:700}}>{ans.score}점</span>}
+                              </div></>}
+                            </div>
+                          );
+                        })}
+                        {uM.length>1&&<button onClick={()=>toggle(r.studentId)} style={{alignSelf:"flex-start",fontSize:11,color:"#64748B",background:"#F1F5F9",border:"none",borderRadius:5,padding:"3px 8px",cursor:"pointer",fontWeight:600}}>{rowExp?"▲ 접기":`▼ 전체 보기 (${uM.length}개)`}</button>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 학생 입장 탭 ──────────────────────────────────────────
+function StudentEnterTab({asms}){
+  const [code,setCode]=useState("");const [err,setErr]=useState("");
+  const enter=()=>{
+    const c=code.replace("#","").trim().toUpperCase();
+    if(!c)return;
+    const found=asms.find(a=>shortCode(a.id)===c);
+    if(!found){setErr("코드를 찾을 수 없습니다. 다시 확인해주세요.");return;}
+    window.location.hash=`#s/${found.id}`;
+  };
+  return(
+    <div style={{maxWidth:380,margin:"50px auto",textAlign:"center"}}>
+      <div style={{fontSize:44,marginBottom:12}}>🎓</div>
+      <h2 style={{margin:"0 0 6px",fontSize:20,fontWeight:800,color:DK}}>학생 입장</h2>
+      <p style={{color:"#64748B",fontSize:13,margin:"0 0 28px"}}>선생님이 알려주신 입장 코드를 입력하세요</p>
+      <input value={code} onChange={e=>{setCode(e.target.value.toUpperCase());setErr("");}} onKeyDown={e=>e.key==="Enter"&&enter()} placeholder="A3F2B1" maxLength={6}
+        style={{...inp,fontSize:26,textAlign:"center",fontWeight:900,letterSpacing:5,padding:"14px",borderRadius:10,borderColor:err?"#FCA5A5":"#E2E8F0"}}/>
+      {err&&<div style={{color:"#DC2626",fontSize:12,marginTop:6}}>{err}</div>}
+      <button onClick={enter} style={btn(BL,undefined,{width:"100%",padding:"13px",fontSize:15,marginTop:12,borderRadius:10})}>입장하기</button>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// 학생 페이지
+// ══════════════════════════════════════════════════════════
+function StudentPage({asmId}){
+  const [asm,setAsm]=useState(null);const [ready,setReady]=useState(false);
+  const [sid,setSid]=useState("");const [confirmed,setConfirmed]=useState("");
+  const [msgs,setMsgs]=useState([]);const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);const [best,setBest]=useState(0);
+  const [submitted,setSubmitted]=useState(false);const [finalQ,setFinalQ]=useState("");
+  const chatRef=useRef(null);
+
+  useEffect(()=>{DB.getA().then(list=>{setAsm(list.find(a=>a.id===asmId)||null);setReady(true);});},[asmId]);
+  useEffect(()=>{if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;},[msgs,loading]);
+  useEffect(()=>{
+    if(!confirmed||!asmId)return;
+    DB.getR(asmId).then(results=>{
+      const ex=results.find(r=>r.studentId===confirmed);
+      if(ex){setMsgs(ex.messages||[]);setBest(ex.bestScore||0);setSubmitted(ex.submitted||false);setFinalQ(ex.finalQuestion||"");}
+    });
+  },[confirmed,asmId]);
+
+  const persist=async(m,bst,sub,fq)=>{
+    const results=await DB.getR(asmId);
+    const idx=results.findIndex(r=>r.studentId===confirmed);
+    const entry={studentId:confirmed,messages:m,bestScore:bst,finalScore:bst,finalQuestion:fq,submitted:sub,updatedAt:new Date().toISOString()};
+    if(idx>=0)results[idx]=entry;else results.push(entry);
+    await DB.setR(asmId,results);
+  };
+
+  const send=async()=>{
+    if(!input.trim()||loading||submitted)return;
+    const content=input.trim();setInput("");
+    const uMsg={role:"user",content};
+    const nextMsgs=[...msgs,uMsg];setMsgs(nextMsgs);setLoading(true);
+    try{
+      const apiMsgs=msgs.map(m=>({role:m.role,content:m.role==="user"?m.content:JSON.stringify({answer:m.answer,score:m.score,feedback:m.feedback})}));
+      apiMsgs.push({role:"user",content});
+      const sys=`당신은 중학교 과학 수업의 AI 평가 도우미입니다.
+수업 주제: ${asm?.subject||"과학"}
+최대 점수: ${asm?.maxScore||10}점
+
+[언어 규칙 - 최우선 적용]
+학생이 사용한 언어로 answer와 feedback을 작성하세요. 예를 들어 학생이 러시아어로 질문하면 러시아어로, 영어로 질문하면 영어로 답변하세요. 단, 채점 기준은 항상 동일하게 적용하세요.
+
+[평가기준]
+${asm?.criteria}
+
+[역할]
+1. 학생 질문에 대해 정확하고 친절하게 답변하세요. 중학생 수준에 맞게 쉽게 설명해주세요.
+2. 위 평가기준의 각 항목별로 점수를 매기고, 총점을 계산하세요.
+3. 이 수행평가의 목적은 학생들이 질문하는 습관을 기르고 더 좋은 질문을 하도록 돕는 것입니다. 점수를 깎는 데 초점을 두지 말고, 왜 이 점수인지 친절히 설명하고 더 나은 질문을 하도록 적극적으로 격려하세요.
+
+[피드백 작성 방법]
+- 평가기준 각 항목마다 몇 점을 받았는지 간단히 설명하세요.
+- 왜 그 점수인지 이유를 구체적으로 알려주세요.
+- 구체적인 질문 예시는 절대 주지 마세요. 대신 "단순한 용어나 개념 확인보다 원리나 이유를 탐구하는 질문을 하면 더 높은 점수를 받을 수 있어요." 정도의 방향만 안내하세요.
+- 학생이 질문한 것 자체는 짧게 격려하되, 과도한 칭찬은 하지 마세요.
+
+[응답 형식 - 반드시 아래 JSON만 출력하고 다른 텍스트는 절대 쓰지 마세요]
+{"answer":"(질문에 대한 정확한 답변)","score":(숫자),"feedback":"(점수 이유 + 더 좋은 질문 예시 + 격려)"}`;
+      const raw=await askAI(apiMsgs,sys);
+      // JSON 추출 (마크다운 코드블록 및 앞뒤 텍스트 제거)
+      let parsed;
+      try{
+        const clean=raw.replace(/```json|```/g,"").trim();
+        const jsonMatch=clean.match(/\{[\s\S]*\}/);
+        parsed=jsonMatch?JSON.parse(jsonMatch[0]):{answer:raw,score:0,feedback:""};
+      }catch{
+        parsed={answer:raw,score:0,feedback:""};
+      }
+      const aiMsg={role:"assistant",answer:parsed.answer,score:parsed.score,feedback:parsed.feedback};
+      const finalMsgs=[...nextMsgs,aiMsg];const newBest=Math.max(best,parsed.score??0);
+      setMsgs(finalMsgs);setBest(newBest);
+      await persist(finalMsgs,newBest,submitted,finalQ);
+    }catch(e){console.error(e);setMsgs([...nextMsgs,{role:"assistant",answer:`오류: ${e.message}`,score:0,feedback:""}]);}
+    setLoading(false);
+  };
+
+  const submitFinal=async()=>{
+    const lastU=[...msgs].reverse().find(m=>m.role==="user");
+    if(!lastU)return alert("먼저 질문을 입력해주세요.");
+    if(!confirm(`최종 제출하시겠습니까?\n점수: ${best}점\n질문: "${lastU.content}"`))return;
+    setSubmitted(true);setFinalQ(lastU.content);
+    await persist(msgs,best,true,lastU.content);
+  };
+
+  if(!ready)return<Center><div style={{color:"#94A3B8"}}>로딩 중...</div></Center>;
+  if(!asm)return<Center><div style={{textAlign:"center",color:"#94A3B8"}}><div style={{fontSize:40}}>🔍</div><div style={{marginTop:10}}>평가를 찾을 수 없습니다.</div></div></Center>;
+
+  if(!confirmed)return(
+    <Center>
+      <div style={{background:"white",borderRadius:20,padding:32,width:310,boxShadow:"0 16px 48px rgba(0,0,0,0.15)",textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:10}}>🔬</div>
+        <div style={{fontWeight:900,fontSize:20,color:BL,marginBottom:3}}>ASSESS AI</div>
+        <div style={{fontWeight:700,fontSize:14,color:DK,marginBottom:3}}>{asm.title}</div>
+        {asm.subject&&<div style={{fontSize:12,color:"#64748B",marginBottom:20}}>📚 {asm.subject}</div>}
+        <label style={{display:"block",textAlign:"left",fontSize:12,fontWeight:600,color:"#475569",marginBottom:6}}>학년-반-번호를 입력하세요</label>
+        <input value={sid} onChange={e=>setSid(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sid.trim()&&setConfirmed(sid.trim())} placeholder="예: 3-2-15" autoFocus
+          style={{...inp,fontSize:18,textAlign:"center",fontWeight:700,padding:"12px",borderRadius:10}}/>
+        <button onClick={()=>sid.trim()&&setConfirmed(sid.trim())} style={btn(BL,undefined,{width:"100%",marginTop:10,padding:"12px",fontSize:14,borderRadius:10})}>확인하기</button>
+      </div>
+    </Center>
+  );
+
+  const uMsgs=msgs.filter(m=>m.role==="user");
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",background:"#F1F5F9"}}>
+      <div style={{background:BL,color:"white",padding:"10px 14px",flexShrink:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontWeight:900,fontSize:15}}>ASSESS AI</div><div style={{fontSize:11,opacity:0.75}}>{asm.title}</div></div>
+          <div style={{textAlign:"right"}}><div style={{fontSize:11,opacity:0.75}}>👤 {confirmed}</div><div style={{fontWeight:800,fontSize:14}}>최고점수: {best}/{asm.maxScore}점</div></div>
+        </div>
+        {submitted&&<div style={{marginTop:8,background:"#10B981",borderRadius:7,padding:"7px 12px",fontSize:12,fontWeight:700}}>✅ 최종 제출 완료 · 점수: {best}점</div>}
+      </div>
+      <div ref={chatRef} style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{background:"#EFF6FF",borderRadius:10,padding:12,fontSize:13,color:"#1E40AF",lineHeight:1.7}}>
+          <strong>👋 안녕하세요!</strong> 오늘 수업 내용과 관련된 질문을 해보세요.{asm.subject&&<><br/><span style={{color:"#3B82F6"}}>📚 {asm.subject}</span></>}
+        </div>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+            {m.role==="user"
+              ?<div style={{background:BL,color:"white",borderRadius:"16px 16px 4px 16px",padding:"10px 13px",maxWidth:"72%",fontSize:13,lineHeight:1.5}}>{m.content}</div>
+              :<div style={{maxWidth:"85%"}}>
+                <div style={{background:"white",borderRadius:"4px 16px 16px 16px",padding:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",fontSize:13,color:DK,lineHeight:1.7}}>{m.answer}</div>
+                {m.score!==undefined&&<div style={{marginTop:6,background:"#F0FDF4",borderRadius:8,padding:"9px 12px",border:"1px solid #BBF7D0"}}>
+                  <div style={{fontWeight:800,color:"#166534",fontSize:13}}>📊 점수: {m.score}/{asm.maxScore}점</div>
+                  {m.feedback&&<div style={{color:"#15803D",fontSize:12,marginTop:4,lineHeight:1.5}}>💡 {m.feedback}</div>}
+                </div>}
+              </div>}
+          </div>
+        ))}
+        {loading&&<div style={{display:"flex",justifyContent:"flex-start"}}><div style={{background:"white",borderRadius:"4px 16px 16px 16px",padding:"11px 14px",boxShadow:"0 1px 4px rgba(0,0,0,0.08)",color:"#94A3B8",fontSize:13}}>⏳ AI가 답변 중...</div></div>}
+      </div>
+      <div style={{padding:"10px 14px",background:"white",borderTop:"1px solid #E2E8F0",flexShrink:0}}>
+        {!submitted?(
+          <>
+            <div style={{display:"flex",gap:8,marginBottom:uMsgs.length>0?8:0}}>
+              <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()} placeholder="수업과 관련된 질문을 입력하세요..." disabled={loading}
+                style={{...inp,flex:1,borderRadius:9,padding:"11px 13px"}}/>
+              <button onClick={send} disabled={loading||!input.trim()} style={btn(loading||!input.trim()?"#CBD5E1":BL,undefined,{cursor:loading?"not-allowed":"pointer",padding:"11px 16px"})}>전송</button>
+            </div>
+            {uMsgs.length>0&&<button onClick={submitFinal} style={btn("#059669",undefined,{width:"100%",padding:"10px",fontSize:13,borderRadius:9})}>✅ 최종 결과 제출 (최고 점수: {best}점)</button>}
+          </>
+        ):(
+          <div style={{background:"#DCFCE7",borderRadius:9,padding:"11px",textAlign:"center",color:"#166534"}}>
+            <div style={{fontWeight:800,fontSize:14,marginBottom:3}}>✅ 제출 완료! 최종 점수: {best}점</div>
+            <div style={{fontSize:12,opacity:0.8}}>최종 질문: "{finalQ}"</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
