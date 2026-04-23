@@ -37,8 +37,8 @@ const { useState, useEffect, useRef } = React;
 
 // ██████████████████████████████████████████████████████████
 // ★ 아래 두 줄에 본인의 값을 입력하세요 ★
-const FIREBASE_URL = "";
-const GEMINI_KEY   = "";
+const FIREBASE_URL = "https://assess-ai-77355-default-rtdb.firebaseio.com";
+const GEMINI_KEY   = "AIzaSyBHm86zrVL-j6THp_wTxjaqUDDs-nXAeOw";
 // ██████████████████████████████████████████████████████████
 
 // ── 상수 ──────────────────────────────────────────────────
@@ -51,10 +51,23 @@ const shortCode=id=>id?id.slice(-6).toUpperCase():"";
 const CFG={
   get fbUrl(){return FIREBASE_URL||localStorage.getItem("aai_fb")||"";},
   set fbUrl(v){localStorage.setItem("aai_fb",v);},
-  get apiKey(){return GEMINI_KEY||localStorage.getItem("aai_key")||"";},
+  get apiKey(){return localStorage.getItem("aai_key")||"";},
   set apiKey(v){localStorage.setItem("aai_key",v);},
-  get ready(){return !!(this.fbUrl&&this.apiKey);},
+  get ready(){return !!(this.fbUrl);},
 };
+
+// Firebase에서 Gemini 키 불러오기
+async function loadGeminiKey(fbUrl) {
+  try {
+    const r = await fetch(`${fbUrl}/config/geminiKey.json`);
+    const d = await r.json();
+    if (d && typeof d === "string") {
+      CFG.apiKey = d;
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
 
 // ── Firebase REST 저장소 ──────────────────────────────────
 const DB={
@@ -134,7 +147,9 @@ function App(){
   const [configured,setConfigured]=useState(CFG.ready);
 
   useEffect(()=>{
-    const parse=async()=>{
+    const init = async () => {
+      if (CFG.fbUrl) await loadGeminiKey(CFG.fbUrl);
+      const parse=async()=>{
       // 쿼리 파라미터 방식 (?id=, ?code=)
       const params=new URLSearchParams(window.location.search);
       const sid=params.get("id");
@@ -159,6 +174,8 @@ function App(){
       setMode("teacher");
     };
     parse();
+    };
+    init();
   },[]);
 
   if(mode==="loading")return null;
