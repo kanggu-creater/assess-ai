@@ -32,7 +32,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 </script>
 <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, Fragment } = React;
 
 const FIREBASE_URL = "https://assess-ai-77355-default-rtdb.firebaseio.com";
 
@@ -497,47 +497,213 @@ function QRTab({quizzes}) {
   );
 }
 
+// ══════════════════════════════════════════════════════════
+// 결과 확인 탭 — 문항별 정답/오답 표시 + 상세보기
+// ══════════════════════════════════════════════════════════
 function ResultsTab({quizzes, uid}) {
-  const [selId,setSelId]=useState(""); const [results,setResults]=useState([]);
-  useEffect(()=>{if(!selId)return;const load=()=>DB.getResults(uid, selId).then(setResults);load();const iv=setInterval(load,4000);return()=>clearInterval(iv);},[selId, uid]);
-  const quiz=quizzes.find(q=>q.id===selId);
-  const sorted=[...results].sort((a,b)=>b.studentId.localeCompare(a.studentId));
-  const total=quiz?.questions?.length||5;
+  const [selId,setSelId]=useState("");
+  const [results,setResults]=useState([]);
+  const [expandedSid, setExpandedSid] = useState(null);
+
+  useEffect(()=>{
+    if(!selId)return;
+    const load=()=>DB.getResults(uid, selId).then(setResults);
+    load();
+    const iv=setInterval(load,4000);
+    return()=>clearInterval(iv);
+  },[selId, uid]);
+
+  const quiz = quizzes.find(q=>q.id===selId);
+  const sorted = [...results].sort((a,b)=>a.studentId.localeCompare(b.studentId, "ko", {numeric:true}));
+  const total = quiz?.questions?.length || 0;
+
+  // 문항별 정답률 통계 (제출한 학생만 기준)
+  const submittedResults = sorted.filter(r => r.submitted);
+  const questionStats = quiz?.questions?.map((_, i) => {
+    const answered = submittedResults.length;
+    const correct = submittedResults.filter(r => r.result?.graded?.[i]?.correct).length;
+    return {
+      correct,
+      total: answered,
+      rate: answered > 0 ? Math.round((correct/answered)*100) : 0
+    };
+  }) || [];
+
+  // 전체 평균 점수
+  const avgScore = submittedResults.length > 0
+    ? (submittedResults.reduce((s,r)=>s+r.score, 0) / submittedResults.length).toFixed(1)
+    : 0;
+
   const download=()=>{
     if(!quiz)return;
-    const rows=sorted.map(r=>({"학번":r.studentId,"점수":r.submitted?r.score:"미제출","총점":total,"제출여부":r.submitted?"제출":"미제출","제출시간":r.submittedAt||""}));
-    const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();
+    const rows=sorted.map(r=>{
+      const row = {
+        "학번": r.studentId,
+        "점수": r.submitted ? r.score : "미제출",
+        "총점": total,
+        "제출여부": r.submitted ? "제출" : "미제출",
+        "제출시간": r.submittedAt ? new Date(r.submittedAt).toLocaleString() : ""
+      };
+      // 문항별 O/X
+      quiz.questions?.forEach((_, i) => {
+        row[`Q${i+1} 정오`] = r.submitted ? (r.result?.graded?.[i]?.correct ? "O" : "X") : "-";
+      });
+      // 문항별 학생 답변
+      quiz.questions?.forEach((_, i) => {
+        row[`Q${i+1} 답변`] = r.submitted ? (r.result?.answers?.[i] || "") : "";
+      });
+      return row;
+    });
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,"퀴즈결과");
     XLSX.writeFile(wb,`${quiz.title}_${quiz.school||""}_${quiz.grade||""}학년.xlsx`);
   };
+
   return (
     <div>
       <div style={{display:"flex",gap:10,marginBottom:18,alignItems:"center",flexWrap:"wrap"}}>
-        <select value={selId} onChange={e=>setSelId(e.target.value)} style={{flex:1,minWidth:200,padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSize:13,outline:"none"}}>
+        <select value={selId} onChange={e=>{setSelId(e.target.value);setExpandedSid(null);}} style={{flex:1,minWidth:200,padding:"10px 12px",border:"1px solid #E2E8F0",borderRadius:8,fontSize:13,outline:"none"}}>
           <option value="">📋 퀴즈를 선택하세요</option>
           {quizzes.map(q=><option key={q.id} value={q.id}>{q.title}</option>)}
         </select>
-        {selId&&<div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:11,color:"#94A3B8"}}>● 4초마다 자동갱신</span>
-          <button onClick={download} style={B("#059669",undefined,{fontSize:13,padding:"9px 16px",whiteSpace:"nowrap"})}>⬇ 엑셀 다운로드</button>
-        </div>}
+        {selId && (
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:"#94A3B8"}}>● 4초마다 자동갱신</span>
+            <button onClick={download} style={B("#059669",undefined,{fontSize:13,padding:"9px 16px",whiteSpace:"nowrap"})}>⬇ 엑셀 다운로드</button>
+          </div>
+        )}
       </div>
-      {selId&&!sorted.length&&<Empty icon="⏳" text="아직 제출한 학생이 없습니다."/>}
-      {sorted.length>0&&(
+
+      {selId && !sorted.length && <Empty icon="⏳" text="아직 제출한 학생이 없습니다."/>}
+
+      {/* ── 상단 요약: 응시 현황 + 문항별 정답률 ── */}
+      {selId && submittedResults.length > 0 && (
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+            <div style={{background:"white",borderRadius:12,padding:"14px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",borderLeft:`4px solid ${PU}`}}>
+              <div style={{fontSize:11,color:"#64748B",marginBottom:3}}>제출 인원</div>
+              <div style={{fontSize:22,fontWeight:900,color:DK}}>{submittedResults.length}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8"}}> / {sorted.length}명</span></div>
+            </div>
+            <div style={{background:"white",borderRadius:12,padding:"14px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",borderLeft:"4px solid #10B981"}}>
+              <div style={{fontSize:11,color:"#64748B",marginBottom:3}}>평균 점수</div>
+              <div style={{fontSize:22,fontWeight:900,color:DK}}>{avgScore}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8"}}> / {total}점</span></div>
+            </div>
+            <div style={{background:"white",borderRadius:12,padding:"14px 18px",boxShadow:"0 1px 4px rgba(0,0,0,0.07)",borderLeft:"4px solid #F59E0B"}}>
+              <div style={{fontSize:11,color:"#64748B",marginBottom:3}}>전체 정답률</div>
+              <div style={{fontSize:22,fontWeight:900,color:DK}}>{total>0 ? Math.round((avgScore/total)*100) : 0}<span style={{fontSize:13,fontWeight:500,color:"#94A3B8"}}>%</span></div>
+            </div>
+          </div>
+
+          <div style={{background:"white",borderRadius:12,padding:"16px 18px",marginBottom:14,boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
+            <div style={{fontSize:13,fontWeight:700,color:DK,marginBottom:10}}>📊 문항별 정답률</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
+              {questionStats.map((s,i)=>{
+                const color = s.rate>=80 ? "#10B981" : s.rate>=50 ? "#F59E0B" : "#EF4444";
+                const bg    = s.rate>=80 ? "#F0FDF4" : s.rate>=50 ? "#FFFBEB" : "#FEF2F2";
+                const qType = quiz.questions[i]?.type || "";
+                return (
+                  <div key={i} style={{background:bg,borderRadius:8,padding:"10px 12px",borderLeft:`3px solid ${color}`}}>
+                    <div style={{fontSize:11,color:"#64748B",marginBottom:2,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontWeight:700,color:DK}}>Q{i+1}</span>
+                      <span style={{fontSize:10,color:qType==="객관식"?"#1D4ED8":"#C2410C"}}>{qType}</span>
+                    </div>
+                    <div style={{fontSize:18,fontWeight:900,color:color}}>{s.rate}%</div>
+                    <div style={{fontSize:10,color:"#94A3B8",marginTop:2}}>{s.correct}/{s.total}명 정답</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── 학생별 결과 테이블 ── */}
+      {sorted.length > 0 && (
         <div style={{background:"white",borderRadius:14,overflow:"auto",boxShadow:"0 1px 4px rgba(0,0,0,0.07)"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-            <thead><tr style={{background:"#F8FAFC"}}>
-              {["학번","점수","제출여부","제출시간"].map(h=>(<th key={h} style={{padding:"11px 14px",textAlign:"left",fontWeight:600,color:"#475569",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"}}>{h}</th>))}
-            </tr></thead>
+            <thead>
+              <tr style={{background:"#F8FAFC"}}>
+                <th style={{padding:"11px 14px",textAlign:"left",fontWeight:600,color:"#475569",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",position:"sticky",left:0,background:"#F8FAFC"}}>학번</th>
+                <th style={{padding:"11px 14px",textAlign:"left",fontWeight:600,color:"#475569",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"}}>점수</th>
+                {quiz?.questions?.map((_,i)=>(
+                  <th key={i} style={{padding:"11px 6px",textAlign:"center",fontWeight:600,color:"#475569",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap",minWidth:40}}>Q{i+1}</th>
+                ))}
+                <th style={{padding:"11px 14px",textAlign:"left",fontWeight:600,color:"#475569",borderBottom:"1px solid #E2E8F0",whiteSpace:"nowrap"}}>제출시간</th>
+                <th style={{padding:"11px 10px",borderBottom:"1px solid #E2E8F0"}}></th>
+              </tr>
+            </thead>
             <tbody>
-              {sorted.map((r,i)=>(
-                <tr key={r.studentId} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"white":"#FAFBFC"}}>
-                  <td style={{padding:"12px 14px",fontWeight:700,color:DK}}>{r.studentId}</td>
-                  <td style={{padding:"12px 14px"}}>{r.submitted?<span style={{background:"#DCFCE7",color:"#166534",padding:"3px 10px",borderRadius:20,fontWeight:700}}>{r.score}/{total}점</span>:<span style={{color:"#94A3B8",fontSize:12}}>진행중</span>}</td>
-                  <td style={{padding:"12px 14px"}}>{r.submitted?<span style={{color:"#059669",fontWeight:600}}>✅ 제출</span>:<span style={{color:"#94A3B8"}}>미제출</span>}</td>
-                  <td style={{padding:"12px 14px",fontSize:12,color:"#64748B"}}>{r.submittedAt?new Date(r.submittedAt).toLocaleTimeString():"-"}</td>
-                </tr>
-              ))}
+              {sorted.map((r,i)=>{
+                const isExp = expandedSid === r.studentId;
+                const rowBg = i%2===0 ? "white" : "#FAFBFC";
+                return (
+                  <Fragment key={r.studentId}>
+                    <tr style={{borderBottom:"1px solid #E2E8F0",background:rowBg}}>
+                      <td style={{padding:"12px 14px",fontWeight:700,color:DK,position:"sticky",left:0,background:rowBg,whiteSpace:"nowrap"}}>{r.studentId}</td>
+                      <td style={{padding:"12px 14px"}}>
+                        {r.submitted
+                          ? <span style={{background:"#DCFCE7",color:"#166534",padding:"3px 10px",borderRadius:20,fontWeight:700,whiteSpace:"nowrap",fontSize:12}}>{r.score}/{total}</span>
+                          : <span style={{color:"#94A3B8",fontSize:12}}>진행중</span>
+                        }
+                      </td>
+                      {quiz?.questions?.map((_,j)=>{
+                        if (!r.submitted) {
+                          return <td key={j} style={{padding:"12px 6px",textAlign:"center",color:"#CBD5E1",fontSize:14}}>·</td>;
+                        }
+                        const correct = r.result?.graded?.[j]?.correct;
+                        return (
+                          <td key={j} style={{padding:"12px 6px",textAlign:"center",fontWeight:900,fontSize:15,color:correct?"#10B981":"#EF4444"}}>
+                            {correct ? "O" : "X"}
+                          </td>
+                        );
+                      })}
+                      <td style={{padding:"12px 14px",fontSize:12,color:"#64748B",whiteSpace:"nowrap"}}>{r.submittedAt?new Date(r.submittedAt).toLocaleTimeString():"-"}</td>
+                      <td style={{padding:"12px 10px",textAlign:"right"}}>
+                        {r.submitted && (
+                          <button
+                            onClick={()=>setExpandedSid(isExp?null:r.studentId)}
+                            style={B("white",PU,{border:`1px solid ${PU}`,fontSize:11,padding:"4px 10px",whiteSpace:"nowrap"})}
+                          >
+                            {isExp?"접기 ▲":"상세 ▼"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {isExp && r.submitted && (
+                      <tr style={{background:"#F8F5FF"}}>
+                        <td colSpan={4 + total} style={{padding:"16px 20px",borderBottom:"1px solid #E2E8F0"}}>
+                          <div style={{fontSize:12,fontWeight:700,color:PU,marginBottom:10}}>📝 {r.studentId} 학생의 상세 답안</div>
+                          {r.result?.questions?.map((qu,k)=>{
+                            const g = r.result.graded?.[k];
+                            return (
+                              <div key={k} style={{background:"white",borderRadius:10,padding:"12px 14px",marginBottom:8,borderLeft:`3px solid ${g?.correct?"#10B981":"#EF4444"}`}}>
+                                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:14}}>{g?.correct?"✅":"❌"}</span>
+                                  <span style={{fontSize:11,background:qu.type==="객관식"?"#EFF6FF":"#FFF7ED",color:qu.type==="객관식"?"#1D4ED8":"#C2410C",fontWeight:700,padding:"2px 8px",borderRadius:10}}>{qu.type}</span>
+                                  <span style={{fontSize:13,fontWeight:700,color:DK}}>Q{k+1}.</span>
+                                  <span style={{fontSize:13,color:DK,lineHeight:1.5}}>{qu.question}</span>
+                                </div>
+                                <div style={{marginLeft:22,fontSize:12,color:"#475569",marginBottom:3}}>
+                                  학생 답변: <strong style={{color:g?.correct?"#16A34A":"#DC2626"}}>{r.result.answers?.[k]||"(미입력)"}</strong>
+                                </div>
+                                <div style={{marginLeft:22,fontSize:12,color:"#16A34A",marginBottom:3}}>
+                                  정답: <strong>{qu.answer}</strong>
+                                </div>
+                                {g?.feedback && (
+                                  <div style={{marginLeft:22,fontSize:12,color:PU,background:"#F3F0FF",borderRadius:8,padding:"6px 10px",marginTop:4,lineHeight:1.6}}>
+                                    💡 {g.feedback}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
