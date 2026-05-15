@@ -111,6 +111,17 @@ const DB={
     arr.forEach(r=>{obj[r.studentId.replace(/[.#$/[\]\s]/g,"_")]=r;});
     await fetch(`${FIREBASE_URL}/results/${uid}/${id}.json`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(obj)});
   },
+  // ★ 학생 한 명의 데이터만 저장 (다른 학생 데이터에 영향 X) ★
+  async setROne(uid, id, studentData){
+    const key=studentData.studentId.replace(/[.#$/[\]\s]/g,"_");
+    const res=await fetch(`${FIREBASE_URL}/results/${uid}/${id}/${key}.json`,{
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(studentData)
+    });
+    if(!res.ok)throw new Error(`저장 실패: ${res.status}`);
+    return await res.json();
+  },
 };
 
 async function askAI(msgs,sys){
@@ -610,12 +621,24 @@ function StudentPage({asmId, ownerUid}){
     });
   },[confirmed,asmId,ownerUid]);
 
+  const [saveStatus,setSaveStatus]=useState(""); // "saving" | "saved" | "error" | ""
+
   const persist=async(m,bst,sub,fq)=>{
-    const results=await DB.getR(ownerUid, asmId);
-    const idx=results.findIndex(r=>r.studentId===confirmed);
     const entry={studentId:confirmed,messages:m,bestScore:bst,finalScore:bst,finalQuestion:fq,submitted:sub,updatedAt:new Date().toISOString()};
-    if(idx>=0)results[idx]=entry;else results.push(entry);
-    await DB.setR(ownerUid, asmId, results);
+    setSaveStatus("saving");
+    // 저장 실패 시 최대 3번 재시도
+    for(let attempt=1;attempt<=3;attempt++){
+      try{
+        await DB.setROne(ownerUid, asmId, entry);
+        setSaveStatus("saved");
+        setTimeout(()=>setSaveStatus(""),2000);
+        return;
+      }catch(e){
+        console.error(`저장 시도 ${attempt} 실패:`,e);
+        if(attempt<3)await new Promise(r=>setTimeout(r,500*attempt));
+      }
+    }
+    setSaveStatus("error");
   };
 
   const send=async()=>{
@@ -702,9 +725,9 @@ ${asm?.criteria}
         <div style={{fontWeight:700,fontSize:14,color:DK,marginBottom:3}}>{asm.title}</div>
         {asm.subject&&<div style={{fontSize:12,color:"#64748B",marginBottom:20}}>📚 {asm.subject}</div>}
         <label style={{display:"block",textAlign:"left",fontSize:12,fontWeight:600,color:"#475569",marginBottom:6}}>학년-반-번호를 입력하세요</label>
-        <input value={sid} onChange={e=>setSid(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sid.trim()&&setConfirmed(sid.trim())} placeholder="예: 3-2-15" autoFocus
+        <input value={sid} onChange={e=>setSid(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sid.trim()&&setConfirmed(sid.replace(/\s+/g,""))} placeholder="예: 3-2-15" autoFocus
           style={{...inp,fontSize:18,textAlign:"center",fontWeight:700,padding:"12px",borderRadius:10}}/>
-        <button onClick={()=>sid.trim()&&setConfirmed(sid.trim())} style={btn(BL,undefined,{width:"100%",marginTop:10,padding:"12px",fontSize:14,borderRadius:10})}>확인하기</button>
+        <button onClick={()=>sid.trim()&&setConfirmed(sid.replace(/\s+/g,""))} style={btn(BL,undefined,{width:"100%",marginTop:10,padding:"12px",fontSize:14,borderRadius:10})}>확인하기</button>
       </div>
     </Center>
   );
@@ -717,6 +740,9 @@ ${asm?.criteria}
           <div><div style={{fontWeight:900,fontSize:15}}>ASSESS AI</div><div style={{fontSize:11,opacity:0.75}}>{asm.title}</div></div>
           <div style={{textAlign:"right"}}><div style={{fontSize:11,opacity:0.75}}>👤 {confirmed}</div><div style={{fontWeight:800,fontSize:14}}>최고점수: {best}/{asm.maxScore}점</div></div>
         </div>
+        {saveStatus==="saving"&&<div style={{marginTop:8,background:"rgba(255,255,255,0.2)",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:600}}>💾 저장 중...</div>}
+        {saveStatus==="saved"&&<div style={{marginTop:8,background:"#10B981",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:600}}>✓ 서버에 저장됨</div>}
+        {saveStatus==="error"&&<div style={{marginTop:8,background:"#DC2626",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:700}}>⚠️ 저장 실패! 다시 질문해주세요</div>}
         {submitted&&<div style={{marginTop:8,background:"#10B981",borderRadius:7,padding:"7px 12px",fontSize:12,fontWeight:700}}>✅ 최종 제출 완료 · 점수: {best}점</div>}
       </div>
       <div ref={chatRef} style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:12}}>
