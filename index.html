@@ -412,8 +412,8 @@ function CriteriaTab({asms,onSave}){
   const [flash,setFlash]=useState(false);
   const f=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
   const submit=async()=>{
-    if(!form.title.trim()||!form.criteria.trim())return alert("제목과 평가기준을 입력해주세요.");
-    const next=editId?asms.map(a=>a.id===editId?{...a,...form}:a):[{...form,id:Date.now().toString(),createdAt:new Date().toISOString()},...asms];
+    if(!form.title.trim())return alert("평가 제목을 입력해주세요.");
+    const next=editId?asms.map(a=>a.id===editId?{...a,...form,maxScore:10}:a):[{...form,maxScore:10,id:Date.now().toString(),createdAt:new Date().toISOString()},...asms];
     await onSave(next);setForm(empty);setEditId(null);setFlash(true);setTimeout(()=>setFlash(false),2000);
   };
   const del=async id=>{if(!confirm("삭제하시겠습니까?"))return;await onSave(asms.filter(a=>a.id!==id));};
@@ -422,28 +422,29 @@ function CriteriaTab({asms,onSave}){
   return(
     <div>
       <div style={{background:"white",borderRadius:14,padding:24,boxShadow:"0 1px 4px rgba(0,0,0,0.07)",marginBottom:20}}>
-        <h2 style={{margin:"0 0 18px",fontSize:16,fontWeight:700,color:DK}}>{editId?"✏️ 수정":"✨ 새 평가기준 작성"}</h2>
+        <h2 style={{margin:"0 0 8px",fontSize:16,fontWeight:700,color:DK}}>{editId?"✏️ 수정":"✨ 새 평가 만들기"}</h2>
+        <div style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:8,padding:"10px 12px",marginBottom:16,fontSize:12,color:"#1E40AF",lineHeight:1.6}}>
+          <strong>📚 연구 기반 루브릭 자동 적용 (10점 만점)</strong><br/>
+          이 앱은 Chin & Brown(2002), Bloom 수정 분류(2001), 이성혜 외(2024) 등 국내외 문헌에 기반한 5요소 루브릭으로 자동 채점합니다: <strong>①수업관련성(2) ②사고수준(4) ③구체성(1) ④탐구가능성(2) ⑤사고표현(1)</strong>
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
           {[["평가 제목 *","title","예: 3학년 – 세포 단원"],["수업 주제","subject","예: 세포의 구조"]].map(([l,k,p])=>(<div key={k}><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>{l}</label><input style={inp} placeholder={p} value={form[k]} onChange={f(k)}/></div>))}
           <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>학년</label><input style={inp} placeholder="예: 3" value={form.grade} onChange={f("grade")}/></div>
           <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>반</label><input style={inp} placeholder="예: 2" value={form.cls} onChange={f("cls")}/></div>
         </div>
         <div style={{marginBottom:12}}>
-          <label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>평가기준 * <span style={{fontWeight:400,color:"#94A3B8"}}>— AI가 이 기준으로 채점합니다</span></label>
-          <textarea style={{...inp,height:120,resize:"vertical"}} placeholder={"예:\n1. 수업 내용 관련 질문인가? (3점)\n2. 심화 사고력이 드러나는가? (4점)\n3. 구체적이고 명확한가? (3점)"} value={form.criteria} onChange={f("criteria")}/>
+          <label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>교사 추가 지침 <span style={{fontWeight:400,color:"#94A3B8"}}>— 선택 사항 (특별히 강조하고 싶은 점만 적으세요)</span></label>
+          <textarea style={{...inp,height:100,resize:"vertical"}} placeholder={"비워두면 기본 루브릭만 적용됩니다.\n\n예시:\n- 이번 단원은 원리 이해가 특히 중요합니다.\n- 실험 관찰과 연결된 질문을 우대해주세요.\n- '왜?' 로 시작하는 질문을 특히 격려합니다."} value={form.criteria} onChange={f("criteria")}/>
         </div>
-        <div style={{display:"flex",alignItems:"flex-end",gap:12}}>
-          <div><label style={{fontSize:13,fontWeight:600,color:"#475569",display:"block",marginBottom:5}}>최대 점수</label><input style={{...inp,width:100}} type="number" min="1" max="100" value={form.maxScore} onChange={f("maxScore")}/></div>
-          <div style={{display:"flex",gap:8}}>
-            {editId&&<button onClick={()=>{setEditId(null);setForm(empty);}} style={btn("white","#64748B",{border:"1px solid #E2E8F0"})}>취소</button>}
-            <button onClick={submit} style={btn(flash?"#10B981":BL)}>{flash?"✓ 저장됨!":editId?"수정 완료":"저장하기"}</button>
-          </div>
+        <div style={{display:"flex",alignItems:"flex-end",justifyContent:"flex-end",gap:8}}>
+          {editId&&<button onClick={()=>{setEditId(null);setForm(empty);}} style={btn("white","#64748B",{border:"1px solid #E2E8F0"})}>취소</button>}
+          <button onClick={submit} style={btn(flash?"#10B981":BL)}>{flash?"✓ 저장됨!":editId?"수정 완료":"저장하기"}</button>
         </div>
       </div>
       {asms.length>0&&<div>
         <h3 style={{fontSize:14,fontWeight:700,color:DK,marginBottom:10}}>저장된 평가기준 ({asms.length}개)</h3>
         {asms.map(a=>(<div key={a.id} style={{background:"white",borderRadius:10,padding:"12px 16px",marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
-          <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14,color:DK,marginBottom:2}}>{a.title}</div><div style={{fontSize:12,color:"#64748B"}}>{a.subject&&`📚 ${a.subject}  `}{a.grade&&`${a.grade}학년 `}{a.cls&&`${a.cls}반  `}• 최대 {a.maxScore}점</div></div>
+          <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14,color:DK,marginBottom:2}}>{a.title}</div><div style={{fontSize:12,color:"#64748B"}}>{a.subject&&`📚 ${a.subject}  `}{a.grade&&`${a.grade}학년 `}{a.cls&&`${a.cls}반  `}• 10점 만점 (루브릭)</div></div>
           <div style={{display:"flex",gap:6}}>
             <button onClick={()=>edit(a)} style={btn("white",BL,{border:`1px solid ${BL}`,fontSize:12,padding:"6px 12px"})}>수정</button>
             <button onClick={()=>copy(a)} style={btn("#F0FDF4","#15803D",{border:"1px solid #86EFAC",fontSize:12,padding:"6px 12px"})}>📋 복사</button>
@@ -512,7 +513,7 @@ function ResultsTab({asms, uid}){
       if(bestIdx>=0){
         rows.push({
           "학번":r.studentId,
-          "최고점수":bestScore,
+          "최고점수 (10점만점)":bestScore,
           "최고점수 질문":uM[bestIdx]?.content||"",
           "AI답변":aM[bestIdx]?.answer||"",
           "AI피드백":aM[bestIdx]?.feedback||"",
@@ -520,7 +521,7 @@ function ResultsTab({asms, uid}){
           "제출여부":r.submitted?"제출":"미제출"
         });
       }else{
-        rows.push({"학번":r.studentId,"최고점수":"미참여","최고점수 질문":"","AI답변":"","AI피드백":"","총 시도횟수":0,"제출여부":"미참여"});
+        rows.push({"학번":r.studentId,"최고점수 (10점만점)":"미참여","최고점수 질문":"","AI답변":"","AI피드백":"","총 시도횟수":0,"제출여부":"미참여"});
       }
     });
     const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();
@@ -553,7 +554,7 @@ function ResultsTab({asms, uid}){
                 const rowExp=exp[r.studentId];
                 return(<tr key={r.studentId} style={{borderBottom:"1px solid #E2E8F0",background:ri%2===0?"white":"#FAFBFC"}}>
                   <td style={{padding:"12px 13px",fontWeight:700,color:DK,whiteSpace:"nowrap"}}>{r.studentId}</td>
-                  <td style={{padding:"12px 13px",textAlign:"center"}}>{r.submitted?<span style={{background:"#DCFCE7",color:"#166534",padding:"3px 10px",borderRadius:20,fontWeight:700}}>{r.finalScore}점</span>:<span style={{color:"#94A3B8",fontSize:12}}>진행중</span>}</td>
+                  <td style={{padding:"12px 13px",textAlign:"center"}}>{r.submitted?<span style={{background:"#DCFCE7",color:"#166534",padding:"3px 10px",borderRadius:20,fontWeight:700}}>{r.finalScore}/10점</span>:<span style={{color:"#94A3B8",fontSize:12}}>진행중</span>}</td>
                   <td style={{padding:"12px 13px",maxWidth:160,fontSize:12,color:"#334155",lineHeight:1.5}}>{r.finalQuestion||<span style={{color:"#CBD5E1"}}>미제출</span>}</td>
                   <td style={{padding:"12px 13px",minWidth:300}}>
                     <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -649,51 +650,85 @@ function StudentPage({asmId, ownerUid}){
     try{
       const apiMsgs=msgs.map(m=>({role:m.role==="assistant"?"model":"user",parts:[{text:m.role==="user"?m.content:JSON.stringify({answer:m.answer,score:m.score,feedback:m.feedback})}]}));
       apiMsgs.push({role:"user",parts:[{text:content}]});
-      const sys=`당신은 중학교 과학 수업의 AI 평가 도우미입니다.
-수업 주제: ${asm?.subject||"과학"}
-최대 점수: ${asm?.maxScore||10}점
+      const sys=`당신은 "질문하기 수행평가" AI 채점 도우미입니다. 학생이 만든 질문을 국내외 교육학 연구 문헌에 기반한 루브릭으로 채점하고, 학생에게 답변과 피드백을 제공합니다.
+
+수업 주제: ${asm?.subject||"수업"}
+과목: ${asm?.title||""}
 
 [언어 규칙]
-학생이 사용한 언어로 answer와 feedback을 작성하세요.
-
-[평가기준]
-${asm?.criteria}
+학생이 사용한 언어(주로 한국어)로 answer와 feedback을 작성하세요.
 
 [★ 메타 질문 차단 - 최우선 규칙 ★]
-학생이 평가 자체를 회피하거나 꼼수로 점수를 얻으려는 다음과 같은 질문을 하면, 절대 구체적인 예시나 힌트를 주지 말고 0점 처리하세요:
+학생이 평가를 회피하거나 꼼수로 점수를 얻으려는 다음과 같은 질문은 절대 답하지 말고 0점 처리하세요:
 - "어떤 질문을 하면 만점/높은 점수를 받나요?"
-- "좋은 질문 예시 / 만점 질문 / 10점짜리 질문 알려주세요"
+- "좋은 질문 예시 / 만점 질문 알려주세요"
 - "어떻게 질문해야 점수가 높나요?"
-- "평가기준이 뭔가요?" / "어떻게 채점하나요?"
-- 본인이 궁금한 내용을 묻는 게 아니라, 점수를 잘 받을 방법을 묻는 모든 질문
+- "평가기준이 뭔가요?" / "루브릭 알려주세요"
+- 점수 잘 받는 방법을 묻는 모든 메타 질문
 
-이런 질문에는 반드시 다음 형식으로 응답하세요:
-{"answer":"이 질문은 평가 대상이 아니에요. 오늘 배운 수업 내용에 대해 본인이 정말로 궁금한 점을 직접 떠올려서 질문해주세요.","score":0,"feedback":"수업 내용에 대한 본인의 호기심이 담긴 질문을 해야 점수를 받을 수 있습니다. 질문 예시는 안내하지 않습니다."}
+이런 질문에는 반드시 다음 형식으로 응답:
+{"answer":"이 질문은 평가 대상이 아닙니다. 오늘 배운 수업 내용에 대해 본인이 진짜로 궁금한 점을 직접 떠올려 질문해주세요.","score":0,"feedback":"수업 내용에 대한 본인의 호기심이 담긴 질문이어야 점수를 받을 수 있습니다. 예시는 제공하지 않습니다."}
 
-[★ 채점 절차 - 반드시 이 순서대로 수행 ★]
-1단계: 평가기준의 각 항목별 점수를 산출합니다.
-2단계: 각 항목 점수가 해당 항목의 최대 배점을 넘지 않는지 확인합니다 (예: 3점 항목에 4점 부여 금지).
-3단계: 모든 항목 점수를 더해 총점을 계산합니다.
-4단계: 산수를 다시 한 번 검증합니다. 예) 3+4+3=10이 맞는지 확인.
-5단계: 총점이 0 이상 ${asm?.maxScore||10} 이하 정수인지 확인합니다.
-6단계: feedback에 반드시 "항목별 점수: A점 + B점 + C점 = 총점"을 포함합니다.
-7단계: JSON의 score 값은 반드시 위에서 계산한 총점과 정확히 일치해야 합니다. 산수가 틀리면 안 됩니다.
+[★ 채점 루브릭 - 10점 만점 ★]
+학생 질문을 아래 5개 요소로 평가하세요. 문헌 근거: Chin & Brown(2002), Chin & Osborne(2008), Anderson & Krathwohl(2001) Bloom 수정 분류, 이성혜 외(2024).
 
-[기타 채점 규칙]
-- 동일한 질문은 항상 동일한 점수를 받아야 합니다.
+① 수업 내용 관련성 (2점)
+  - 2점: 수업 주제·개념과 명확히 연결됨. 학습 내용을 정확히 이해한 위에서 나온 질문.
+  - 1점: 부분적으로 관련. 관련성은 있으나 다소 벗어남.
+  - 0점: 수업 내용과 관련 없음.
 
-[역할]
-1. 정상적인 학습 질문에는 친절하고 정확하게 답변하세요. 중학생 수준에 맞게 설명하세요.
-2. 평가기준 항목별 점수와 합계를 feedback에 반드시 명시하세요.
-3. 구체적인 질문 예시는 절대 주지 마세요. "원리나 이유를 탐구하는 방향이 좋다" 정도만 안내합니다.
-4. 과도한 칭찬은 하지 마세요.
+② 사고의 수준 (4점) — 가장 큰 배점
+  - 4점: 궁금증 질문 (Bloom 4~6단계). 이상 감지, 종합·평가, 창의적 적용. 
+    예: "~는 왜 예상과 다른가?", "만약 ~라면 어떻게 될까?", "~의 판단 기준은?"
+  - 3점: 적용·분석 질문 (Bloom 3단계). 다른 상황 적용, 원인 분석, 비교.
+    예: "이 원리를 ~에 적용하면?", "A와 B의 차이는 왜 발생하는가?"
+  - 2점: 이해 질문 (Bloom 2단계). 원리·이유 파악.
+    예: "왜 그런 현상이 일어나나요?", "이 개념이 뜻하는 것은?"
+  - 1점: 기본정보 질문 (Bloom 1단계). 사실·절차 확인.
+    예: "~의 정의는?", "~는 언제 발견되었나?"
+  - 0점: 질문이 아니거나 무관.
 
-[응답 형식 - 반드시 JSON만 출력, 다른 텍스트 금지]
-{"answer":"...","score":숫자,"feedback":"항목별 점수: ...점 + ...점 + ...점 = ...점. 추가 설명..."}`;
+③ 구체성과 명확성 (1점)
+  - 1점: 구체적이고 답변 방향이 명확. 어떤 개념·현상에 대한 질문인지 분명.
+  - 0점: 모호하거나 지나치게 광범위 (예: "과학이 뭔가요?").
+
+④ 탐구 가능성 (2점)
+  - 2점: 탐구·논증·자료 조사·논리 추론·문학 분석 등으로 답 도출 가능. 사고 과정 필요.
+  - 1점: 부분적으로 탐구 가능. 답이 어느 정도 정해져 있으나 사고 필요.
+  - 0점: 단순 검색으로 즉답 가능하거나, 반대로 답을 찾을 방법이 없음.
+
+⑤ 학생의 사고 표현 (1점)
+  - 1점: 학생의 관찰·예상·사전 지식·의문의 흔적이 질문에 드러남.
+    예: "수업에서 ~라고 배웠는데, 실제로는 ~인 이유가 궁금합니다."
+  - 0점: 단순 정보 요청. 학생 사고의 흔적 없음.
+
+[★ 채점 절차 - 반드시 이 순서대로 ★]
+1단계: 5개 요소별로 점수 산출 (①②③④⑤)
+2단계: 각 항목이 최대 배점을 넘지 않는지 확인
+3단계: 5개 점수의 합계 계산 (2+4+1+2+1 = 최대 10점)
+4단계: 산수 재검증 (예: 2+3+1+2+1 = 9)
+5단계: 총점이 0~10 범위의 정수인지 확인
+6단계: feedback에 반드시 다음 형식 포함:
+       "①수업관련성 X/2점, ②사고수준 X/4점, ③구체성 X/1점, ④탐구가능성 X/2점, ⑤사고표현 X/1점 = 총 X/10점"
+       그 뒤에 향상을 위한 짧은 코멘트 1문장.
+
+[교사 추가 지침]
+${asm?.criteria ? "이 평가에서 교사가 추가로 강조하는 지침:\n" + asm.criteria + "\n\n위 루브릭 채점 시 이 지침을 참고하되, 루브릭 5요소 채점 방식은 그대로 유지하세요." : "교사가 별도 지침을 제공하지 않았습니다. 루브릭 5요소로 채점하세요."}
+
+[기타 원칙]
+- 동일 질문에는 항상 동일 점수 (일관성)
+- 정상적 학습 질문에는 친절하고 정확하게 답변 (학생 수준에 맞게)
+- 구체적 질문 예시 절대 제공 금지. "원리를 탐구하는 방향이 좋다" 정도만 안내.
+- 과도한 칭찬 금지. 객관적 피드백.
+- answer는 학생 질문에 대한 실제 답변 (수업 내용 설명)
+- feedback은 채점 근거와 향상 방향 안내
+
+[응답 형식 - 반드시 JSON만, 다른 텍스트 금지]
+{"answer":"학생 질문에 대한 답변 내용","score":정수(0~10),"feedback":"①수업관련성 X/2점, ②사고수준 X/4점, ③구체성 X/1점, ④탐구가능성 X/2점, ⑤사고표현 X/1점 = 총 X/10점. 짧은 향상 코멘트."}`;
       const raw=await askAI(apiMsgs,sys);
       let parsed;try{const m=raw.replace(/```json|```/g,"").trim().match(/\{[\s\S]*\}/);parsed=m?JSON.parse(m[0]):{answer:raw,score:0,feedback:""};}catch{parsed={answer:raw,score:0,feedback:""};}
-      // 점수 검증: 정수 + 0~max 범위로 강제 보정
-      const maxS=asm?.maxScore||10;
+      // 점수 검증: 정수 + 0~10 범위로 강제 보정 (루브릭 10점 만점)
+      const maxS=10;
       let s=parseInt(parsed.score);
       if(isNaN(s)||s<0)s=0;
       if(s>maxS)s=maxS;
@@ -709,7 +744,7 @@ ${asm?.criteria}
   const submitFinal=async()=>{
     const lastU=[...msgs].reverse().find(m=>m.role==="user");
     if(!lastU)return alert("먼저 질문을 입력해주세요.");
-    if(!confirm(`최종 제출하시겠습니까?\n점수: ${best}점\n질문: "${lastU.content}"`))return;
+    if(!confirm(`최종 제출하시겠습니까?\n점수: ${best}/10점\n질문: "${lastU.content}"`))return;
     setSubmitted(true);setFinalQ(lastU.content);
     await persist(msgs,best,true,lastU.content);
   };
@@ -738,16 +773,24 @@ ${asm?.criteria}
       <div style={{background:BL,color:"white",padding:"10px 14px",flexShrink:0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div><div style={{fontWeight:900,fontSize:15}}>ASSESS AI</div><div style={{fontSize:11,opacity:0.75}}>{asm.title}</div></div>
-          <div style={{textAlign:"right"}}><div style={{fontSize:11,opacity:0.75}}>👤 {confirmed}</div><div style={{fontWeight:800,fontSize:14}}>최고점수: {best}/{asm.maxScore}점</div></div>
+          <div style={{textAlign:"right"}}><div style={{fontSize:11,opacity:0.75}}>👤 {confirmed}</div><div style={{fontWeight:800,fontSize:14}}>최고점수: {best}/10점</div></div>
         </div>
         {saveStatus==="saving"&&<div style={{marginTop:8,background:"rgba(255,255,255,0.2)",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:600}}>💾 저장 중...</div>}
         {saveStatus==="saved"&&<div style={{marginTop:8,background:"#10B981",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:600}}>✓ 서버에 저장됨</div>}
         {saveStatus==="error"&&<div style={{marginTop:8,background:"#DC2626",borderRadius:7,padding:"6px 12px",fontSize:11,fontWeight:700}}>⚠️ 저장 실패! 다시 질문해주세요</div>}
-        {submitted&&<div style={{marginTop:8,background:"#10B981",borderRadius:7,padding:"7px 12px",fontSize:12,fontWeight:700}}>✅ 최종 제출 완료 · 점수: {best}점</div>}
+        {submitted&&<div style={{marginTop:8,background:"#10B981",borderRadius:7,padding:"7px 12px",fontSize:12,fontWeight:700}}>✅ 최종 제출 완료 · 점수: {best}/10점</div>}
       </div>
       <div ref={chatRef} style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:12}}>
         <div style={{background:"#EFF6FF",borderRadius:10,padding:12,fontSize:13,color:"#1E40AF",lineHeight:1.7}}>
           <strong>👋 안녕하세요!</strong> 오늘 수업 내용과 관련된 질문을 해보세요.{asm.subject&&<><br/><span style={{color:"#3B82F6"}}>📚 {asm.subject}</span></>}
+        </div>
+        <div style={{background:"#FEF3C7",borderRadius:10,padding:12,fontSize:12,color:"#78350F",lineHeight:1.7}}>
+          <strong>💡 좋은 질문의 5가지 힌트</strong><br/>
+          ① 수업에서 배운 개념과 연결하기<br/>
+          ② "왜?", "어떻게?", "만약 ~라면?"을 활용하기<br/>
+          ③ 구체적이고 명확하게 질문하기<br/>
+          ④ 검색으로 바로 나오는 답 말고, 탐구할 만한 질문하기<br/>
+          ⑤ 본인의 관찰이나 예상을 함께 표현하기
         </div>
         {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
           {m.role==="user"
@@ -755,7 +798,7 @@ ${asm?.criteria}
             :<div style={{maxWidth:"85%"}}>
               <div style={{background:"white",borderRadius:"4px 16px 16px 16px",padding:12,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",fontSize:13,color:DK,lineHeight:1.7}}>{m.answer}</div>
               {m.score!==undefined&&<div style={{marginTop:6,background:"#F0FDF4",borderRadius:8,padding:"9px 12px",border:"1px solid #BBF7D0"}}>
-                <div style={{fontWeight:800,color:"#166534",fontSize:13}}>📊 점수: {m.score}/{asm.maxScore}점</div>
+                <div style={{fontWeight:800,color:"#166534",fontSize:13}}>📊 점수: {m.score}/10점</div>
                 {m.feedback&&<div style={{color:"#15803D",fontSize:12,marginTop:4,lineHeight:1.5}}>💡 {m.feedback}</div>}
               </div>}
             </div>}
@@ -770,11 +813,11 @@ ${asm?.criteria}
                 style={{...inp,flex:1,borderRadius:9,padding:"11px 13px"}}/>
               <button onClick={send} disabled={loading||!input.trim()} style={btn(loading||!input.trim()?"#CBD5E1":BL,undefined,{cursor:loading?"not-allowed":"pointer",padding:"11px 16px"})}>전송</button>
             </div>
-            {uMsgs.length>0&&<button onClick={submitFinal} style={btn("#059669",undefined,{width:"100%",padding:"10px",fontSize:13,borderRadius:9})}>✅ 최종 결과 제출 (최고 점수: {best}점)</button>}
+            {uMsgs.length>0&&<button onClick={submitFinal} style={btn("#059669",undefined,{width:"100%",padding:"10px",fontSize:13,borderRadius:9})}>✅ 최종 결과 제출 (최고 점수: {best}/10점)</button>}
           </>
         ):(
           <div style={{background:"#DCFCE7",borderRadius:9,padding:"11px",textAlign:"center",color:"#166534"}}>
-            <div style={{fontWeight:800,fontSize:14,marginBottom:3}}>✅ 제출 완료! 최종 점수: {best}점</div>
+            <div style={{fontWeight:800,fontSize:14,marginBottom:3}}>✅ 제출 완료! 최종 점수: {best}/10점</div>
             <div style={{fontSize:12,opacity:0.8}}>최종 질문: "{finalQ}"</div>
           </div>
         )}
